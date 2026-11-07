@@ -1,0 +1,162 @@
+// REVIEW PROTOTYPE: outside prisma/schema and not loaded by the app.
+// Auth models are copied from the current schema for relation validation.
+// Additions: Role, Profile, Location, ProfileLocation, ParentStudent, Team,
+// TeamMembership, and User.profile.
+// Feature settings are deferred. See docs/ogenesis-access-plan.md.
+// Account-creation rules and no-email-verification behavior are server policies.
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  STUDENT
+  PARENT
+  COACH
+  ADMIN
+  SUPERUSER
+}
+
+model Profile {
+  userId                 String            @id
+  user                   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role                   Role
+  phoneNumber            String?
+  locations              ProfileLocation[]
+  teams                  TeamMembership[]
+  children               ParentStudent[]   @relation("ParentChildren")
+  parents                ParentStudent[]   @relation("StudentParents")
+  // Only STUDENT profiles may hold a code; enforce this in the server action.
+  parentLinkCodeHash      String?           @unique
+  parentLinkCodeExpiresAt DateTime?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  @@map("profile")
+}
+
+model ParentStudent {
+  parentId  String
+  studentId String
+  parent    Profile  @relation("ParentChildren", fields: [parentId], references: [userId], onDelete: Cascade)
+  student   Profile  @relation("StudentParents", fields: [studentId], references: [userId], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([parentId, studentId])
+  @@index([studentId])
+  @@map("parent_student")
+}
+
+model Location {
+  id          String            @id @default(cuid())
+  name        String
+  city        String
+  countryCode String            @db.Char(2)
+  profiles    ProfileLocation[]
+  teams       Team[]
+
+  @@map("location")
+}
+
+model ProfileLocation {
+  // A profile shares its primary key with its user.
+  userId     String
+  locationId String
+  profile    Profile  @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@id([userId, locationId])
+  @@index([locationId])
+  @@map("profile_location")
+}
+
+model Team {
+  id          String           @id @default(cuid())
+  name        String
+  locationId  String
+  location    Location         @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  members     TeamMembership[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([locationId])
+  @@map("team")
+}
+
+model TeamMembership {
+  teamId    String
+  userId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  // The profile's existing role identifies a STUDENT or COACH member.
+  profile   Profile  @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([teamId, userId])
+  @@index([userId])
+  @@map("team_membership")
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  // Retained for Better Auth compatibility; not a signup or login requirement.
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  profile       Profile?
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}

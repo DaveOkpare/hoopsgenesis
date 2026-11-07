@@ -1,0 +1,21 @@
+{
+  "name": "@hoops-genesis/auth",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@better-auth/expo": "catalog:",
+    "@hoops-genesis/db": "workspace:*",
+    "better-auth": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@hoops-genesis/config": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}
