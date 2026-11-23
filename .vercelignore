@@ -10,3 +10,15 @@
 local.db
 local.db-*
 .alchemy/
+
+# Not needed to build or run the web app
+.agents/
+.claude/
+.codex/
+.cursor/
+.vscode/
+.zed/
+docs/
+packages/db/prototypes/
+/*.md
+.turbo/
