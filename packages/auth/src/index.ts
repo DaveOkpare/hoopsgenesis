@@ -26,13 +26,18 @@ const hasRole = (roles: string | null | undefined, role: string): boolean =>
     .map((value) => value.trim())
     .includes(role);
 
-export function createAuth(env: AuthConfig, database: Database) {
+export function createAuth(
+  env: AuthConfig,
+  database: Database,
+  extraTrustedOrigins: readonly string[] = []
+) {
   return betterAuth({
     database: prismaAdapter(database, {
       provider: "postgresql",
     }),
     trustedOrigins: [
       env.BETTER_AUTH_URL,
+      ...extraTrustedOrigins,
       "hoops-genesis://",
       "exp://",
       "http://localhost:8081",
