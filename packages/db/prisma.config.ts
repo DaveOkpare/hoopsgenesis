@@ -9,6 +9,8 @@ export default defineConfig({
     path: path.join("prisma", "migrations"),
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    // The Prisma CLI (migrations, studio) uses this URL; the app connects
+    // through its own driver adapter. Prefer the direct connection when set.
+    url: process.env.DATABASE_DIRECT_URL || env("DATABASE_URL"),
   },
 });
