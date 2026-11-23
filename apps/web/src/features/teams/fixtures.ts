@@ -12,3 +12,14 @@ export const teamAttendancePercent: Record<Id, number> = {
   "team-u16": 81,
   "team-girls-u16": 79,
 };
+
+/** "Haven't paid November" per team, as on the coach's My teams cards (8RA-0). */
+export const teamUnpaidCount: Record<Id, number> = {
+  "team-u12": 1,
+  "team-u14": 3,
+  "team-u16": 2,
+  "team-girls-u16": 1,
+};
+
+/** The preview coach (Sharika, /coach/*): GET /teams returns the teams she is on. */
+export const PREVIEW_COACH_ID = "user-sharika";

@@ -12,6 +12,13 @@ const KIND_LABEL: Record<string, string> = {
   report_card: "Report card",
 };
 
+/** The server's record templates (`data.template`, see GET /record-templates). */
+const TEMPLATE_LABEL: Record<string, string> = {
+  report_card: "Report card",
+  sprint_100m: "100 m sprint",
+  fitness_test: "Fitness test",
+};
+
 const MS_PER_DAY = 86_400_000;
 
 function capitalise(value: string): string {
@@ -32,6 +39,10 @@ function str(value: unknown): string | null {
 /** "Report card", "Free throws". */
 export function recordTitle(item: ReviewItem): string {
   const { data } = item;
+  const template = str(data.template);
+  if (template) {
+    return TEMPLATE_LABEL[template] ?? humanise(template);
+  }
   if (item.recordType === "academic") {
     const kind = str(data.kind);
     return kind ? (KIND_LABEL[kind] ?? humanise(kind)) : "Academic record";
@@ -67,11 +78,74 @@ export function recordProvenance(item: ReviewItem, timeZone: string): string {
   return `${verb} by ${firstName(item.recordedByName)} on ${formatDayMonth(item.recordedOn, timeZone)}${file ? ` · ${file}` : ""}`;
 }
 
+function num(value: unknown, unit = ""): string | null {
+  return typeof value === "number" ? `${value}${unit}` : null;
+}
+
+function subjectList(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const rows = value as { subject?: unknown; grade?: unknown }[];
+  const text = rows
+    .map((row) => `${str(row.subject) ?? ""} ${str(row.grade) ?? ""}`.trim())
+    .filter(Boolean)
+    .join(", ");
+  return text || null;
+}
+
+/** Rows for the server's templates (report_card, sprint_100m, fitness_test). */
+function templateFields(
+  template: string,
+  data: Record<string, unknown>
+): { label: string; value: string | null }[] {
+  switch (template) {
+    case "report_card":
+      return [
+        { label: "School", value: str(data.schoolName) },
+        { label: "Term", value: str(data.term) },
+        { label: "School year", value: str(data.schoolYear) },
+        { label: "Grades", value: subjectList(data.subjects) },
+        { label: "Average", value: num(data.averageScore, "%") },
+        { label: "Notes", value: str(data.notes) },
+      ];
+    case "sprint_100m":
+      return [
+        { label: "Time", value: num(data.timeSeconds, " s") },
+        {
+          label: "Timing",
+          value: str(data.timing) && humanise(String(data.timing)),
+        },
+        { label: "Wind", value: num(data.windMps, " m/s") },
+        { label: "Notes", value: str(data.notes) },
+      ];
+    case "fitness_test":
+      return [
+        { label: "Beep test level", value: num(data.beepTestLevel) },
+        { label: "Push-ups (1 min)", value: num(data.pushUps) },
+        { label: "Sit-ups (1 min)", value: num(data.sitUps) },
+        { label: "Vertical jump", value: num(data.verticalJumpCm, " cm") },
+        { label: "Plank", value: num(data.plankSeconds, " s") },
+        { label: "Notes", value: str(data.notes) },
+      ];
+    default:
+      return Object.entries(data)
+        .filter(([key]) => key !== "template")
+        .map(([key, value]) => ({ label: humanise(key), value: str(value) }));
+  }
+}
+
 /** The "What Aline entered" rows. */
 export function recordFields(
   item: ReviewItem
 ): { label: string; value: string }[] {
   const { data } = item;
+  const template = str(data.template);
+  if (template) {
+    return templateFields(template, data).filter(
+      (field): field is { label: string; value: string } => field.value !== null
+    );
+  }
   const fields: { label: string; value: string | null }[] =
     item.recordType === "academic"
       ? [

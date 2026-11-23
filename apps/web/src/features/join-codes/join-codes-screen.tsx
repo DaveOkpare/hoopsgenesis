@@ -277,7 +277,11 @@ export function JoinCodesScreen({
   const now = useJoinCodesNow();
   const isPhone = useIsPhone();
   const codes = useQuery(joinCodesQueryOptions(academyId)).data;
-  const counts = useQuery(memberCountsQueryOptions(academyId)).data;
+  // Only the tab counts; left out if it fails.
+  const counts = useQuery({
+    ...memberCountsQueryOptions(academyId),
+    throwOnError: false,
+  }).data;
   const { active, inactive } = useMemo(() => splitCodes(codes ?? []), [codes]);
 
   const desktopSelected =

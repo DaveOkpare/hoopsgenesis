@@ -10,6 +10,23 @@
  *
  * `import.meta.env.DEV` is replaced with `false` in production builds, so this whole
  * branch is removed there no matter what the variable says.
+ *
+ * Fixtures are never in a production bundle. Each feature keeps its fixture
+ * implementation in a sibling `api.mock.ts` (with its in-memory stores) and its real
+ * implementation in `api.ts`, which delegates to the mock only in dev preview:
+ *
+ *   const mock =
+ *     import.meta.env.DEV && isUiPreview ? () => import("./api.mock") : null;
+ *
+ *   export async function listFees(academyId: Id, params: FeeParams) {
+ *     if (mock) {
+ *       return (await mock()).listFees(academyId, params);
+ *     }
+ *     return apiAll<Fee>(academyPath(academyId, "/fees"), { query: params });
+ *   }
+ *
+ * Keep the literal `import.meta.env.DEV &&` in that ternary: the bundler folds it to
+ * `false` and drops the dynamic import (and with it every fixture module).
  */
 import { ENV } from "@/env";
 import type { ViewerPersona } from "@/features/viewer/api";
@@ -26,6 +43,22 @@ const PERSONAS: readonly ViewerPersona[] = [
 
 function isPersona(value: unknown): value is ViewerPersona {
   return PERSONAS.includes(value as ViewerPersona);
+}
+
+/** The moment every design is drawn at: Mon 23 Nov 2026, 10:02 in Kigali. */
+export const PREVIEW_NOW = new Date("2026-11-23T08:02:00Z");
+
+const PAGE_LOADED_AT = Date.now();
+
+/**
+ * "Now" for the app. Real mode: the clock. Preview: the designs' moment plus the time
+ * since the page loaded, so new rows sort after the fixtures and read as "Today".
+ */
+export function appNow(): Date {
+  if (import.meta.env.DEV && isUiPreview) {
+    return new Date(PREVIEW_NOW.getTime() + (Date.now() - PAGE_LOADED_AT));
+  }
+  return new Date();
 }
 
 export function previewPersonaFor(

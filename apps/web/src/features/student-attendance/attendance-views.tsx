@@ -9,6 +9,7 @@ import { cn } from "@hoops-genesis/ui/lib/utils";
 import type { ReactNode } from "react";
 
 import { ChevronDownIcon, TickIcon } from "@/components/student/icons";
+import type { MyAttendance } from "@/features/student-attendance/queries";
 import type { AttendanceSummary } from "@/features/student-attendance/summary";
 import {
   type MonthKey,
@@ -16,7 +17,7 @@ import {
   monthShortLabel,
 } from "@/features/student-calendar/dates";
 import type { DayCell } from "@/features/student-calendar/month-grid";
-import type { AttendanceRecord, AttendanceStatus } from "@/features/types";
+import type { AttendanceStatus } from "@/features/types";
 
 /* Pieces of "[Student] My attendance" (46Z-0). */
 
@@ -45,7 +46,7 @@ function Dot({ kind }: { kind: AttendanceStatus | "upcoming" }) {
 }
 
 export function attendanceCell(
-  row: AttendanceRecord | undefined,
+  row: MyAttendance | undefined,
   options: { isToday: boolean; upcoming: boolean }
 ): DayCell {
   const highlight = options.isToday ? "ink" : undefined;

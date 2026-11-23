@@ -6,10 +6,10 @@ import {
 } from "@tanstack/react-query";
 
 import {
-  consoleNow,
   createAcademy,
   getPlatformAcademy,
   listPlatformAcademies,
+  OWNER_CAN_REPLACE_QR as ownerCanReplaceQr,
   type PlatformAcademy,
   regenerateAcademyQr,
   searchPlaces,
@@ -31,11 +31,6 @@ export const platformAcademyKeys = {
     [...platformAcademyKeys.all, "detail", academyId] as const,
   places: ["platform", "places"] as const,
 };
-
-/** "Today" for relative dates ("Today", "Yesterday", "16 Nov"). */
-export function referenceNow(): Date {
-  return consoleNow();
-}
 
 export function platformAcademiesQueryOptions() {
   return queryOptions({
@@ -96,9 +91,13 @@ export function useRegenerateAcademyQr() {
         platformAcademyKeys.all,
         (list) => upsert(list, row)
       );
+      // The detail key sits under `all`, so this refetches the panel too.
       await queryClient.invalidateQueries({
         queryKey: platformAcademyKeys.all,
       });
     },
   });
 }
+
+/** Whether the console offers "Replace QR code" (no owner endpoint; preview only). */
+export const OWNER_CAN_REPLACE_QR: boolean = ownerCanReplaceQr;

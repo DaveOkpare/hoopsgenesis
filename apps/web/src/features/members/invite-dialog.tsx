@@ -34,7 +34,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import z from "zod";
-
+import { DIALOG_ERROR_CLASS, QueryBoundary } from "@/components/error-state";
 import {
   EmailChipsInput,
   type EmailStatus,
@@ -53,7 +53,7 @@ import {
   teamListQueryOptions,
 } from "@/features/teams/queries";
 import type { Id } from "@/features/types";
-import { useViewer } from "@/features/viewer/queries";
+import { errorMessage } from "@/lib/api-client";
 import { useIsPhone } from "@/lib/use-is-phone";
 
 const NO_TEAM = "none";
@@ -260,7 +260,6 @@ function InviteForm({
   defaultRole: InvitableRole;
   onDone: () => void;
 }) {
-  const viewer = useViewer();
   const isPhone = useIsPhone();
   const teams = useQuery(teamListQueryOptions(academyId)).data ?? [];
   const owner = useQuery(platformOwnerQueryOptions()).data;
@@ -288,13 +287,19 @@ function InviteForm({
       if (toSend.length === 0) {
         return;
       }
-      await invite.mutateAsync({
-        academyId,
-        emails: toSend,
-        role: value.role,
-        teamId: value.teamId === NO_TEAM ? null : value.teamId,
-        inviterId: viewer.user.id,
-      });
+      try {
+        await invite.mutateAsync({
+          academyId,
+          emails: toSend,
+          role: value.role,
+          teamId: value.teamId === NO_TEAM ? null : value.teamId,
+        });
+      } catch (error) {
+        toast.error(
+          errorMessage(error, "Couldn’t send the invites. Try again.")
+        );
+        return;
+      }
       toast.success(
         `${toSend.length} ${inviteWord(toSend.length)} sent. Each link works for 48 hours.`
       );
@@ -434,11 +439,13 @@ export function InviteDialog({
           </DialogDescription>
         </DialogHeader>
         {open ? (
-          <InviteForm
-            academyId={academyId}
-            defaultRole={defaultRole}
-            onDone={close}
-          />
+          <QueryBoundary className={DIALOG_ERROR_CLASS} what="the invite form">
+            <InviteForm
+              academyId={academyId}
+              defaultRole={defaultRole}
+              onDone={close}
+            />
+          </QueryBoundary>
         ) : null}
       </DialogContent>
     </Dialog>

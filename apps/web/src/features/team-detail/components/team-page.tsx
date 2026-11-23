@@ -42,7 +42,6 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { useIsPhone } from "@/components/coach/use-is-phone";
 import { MoreIcon, PlusIcon } from "@/components/icons";
 import { AddMemberPanel } from "@/features/team-detail/components/add-member-panel";
 import {
@@ -57,7 +56,9 @@ import {
   useRemoveTeamMember,
 } from "@/features/team-detail/queries";
 import type { DateOnly, Id } from "@/features/types";
+import { errorMessage } from "@/lib/api-client";
 import { formatDayMonth, initials } from "@/lib/format";
+import { useIsPhone } from "@/lib/use-is-phone";
 
 export type TeamPageRole = "coach" | "admin";
 
@@ -70,7 +71,24 @@ function ageLabel(ageGroup: string | null): string | null {
   return match ? `Under ${match[1]}` : ageGroup;
 }
 
+function feeText(fee: TeamFeeStatus): string {
+  if (fee.kind === "overdue") {
+    return `Fees ${fee.days} days overdue`;
+  }
+  if (fee.kind === "unpaid") {
+    return "Not paid yet";
+  }
+  return `Paid to ${formatDayMonth(fee.paidTo)}`;
+}
+
 function FeeCell({ fee }: { fee: TeamFeeStatus }) {
+  if (fee.kind === "unpaid") {
+    return (
+      <span className="font-semibold text-orange-deep text-sm leading-[18px]">
+        Not paid yet
+      </span>
+    );
+  }
   if (fee.kind === "overdue") {
     return (
       <span className="inline-flex rounded-full bg-orange-soft px-[10px] py-[3px] font-semibold text-[13px] text-orange-deep leading-4">
@@ -116,8 +134,8 @@ function RowMenu({
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuItem
-          data-member-id={student.memberId}
           data-name={student.user.name}
+          data-user-id={student.user.id}
           onClick={onRemove}
           variant="destructive"
         >
@@ -149,7 +167,7 @@ function CoachesCard({
         {detail.coaches.map((coach) => {
           const isViewer = coach.user.id === viewerId;
           return (
-            <li className="flex items-center gap-3" key={coach.memberId}>
+            <li className="flex items-center gap-3" key={coach.user.id}>
               <Avatar size={32} tone={isViewer ? "ink" : "white"}>
                 <AvatarFallback>{initials(coach.user.name)}</AvatarFallback>
               </Avatar>
@@ -217,17 +235,9 @@ export function TeamPage({
   addQuery?: string;
   onAddQueryChange: (query: string | undefined) => void;
 }) {
+  // A failure throws to the route's error screen: 404 shows "Page not found", 403
+  // "No access", anything else "Try again".
   const query = useQuery(teamDetailQueryOptions(academyId, teamId, today));
-  if (query.isError) {
-    return (
-      <div className="flex flex-col gap-3">
-        <PageTitle>Team not found</PageTitle>
-        <p className="text-[15px] text-muted leading-5">
-          It may have been removed, or you are not on it.
-        </p>
-      </div>
-    );
-  }
   if (!query.data) {
     return <TeamSkeleton />;
   }
@@ -304,15 +314,18 @@ function TeamView({
   );
   const handleRemove = useCallback(
     (event: MouseEvent<HTMLElement>) => {
-      const { memberId, name } = event.currentTarget.dataset;
-      if (!memberId) {
+      const { userId, name } = event.currentTarget.dataset;
+      if (!userId) {
         return;
       }
       removeMutate(
-        { teamId: team.id, memberId },
+        { teamId: team.id, userId },
         {
           onSuccess: () => toast.success(`${name} removed from ${team.name}`),
-          onError: (error) => toast.error(error.message),
+          onError: (error) =>
+            toast.error(
+              errorMessage(error, "Couldn't remove them. Try again.")
+            ),
         }
       );
     },
@@ -385,7 +398,7 @@ function TeamView({
               </TableHeader>
               <TableBody>
                 {visible.map((student) => (
-                  <TableRow key={student.memberId}>
+                  <TableRow key={student.user.id}>
                     <TableCell>
                       <span className="flex items-center gap-3">
                         <Avatar size={32}>
@@ -425,7 +438,7 @@ function TeamView({
             {visible.map((student) => (
               <li
                 className="flex items-center gap-3 border-line border-b py-3"
-                key={student.memberId}
+                key={student.user.id}
               >
                 <Avatar size={36}>
                   <AvatarFallback>{initials(student.user.name)}</AvatarFallback>
@@ -441,15 +454,17 @@ function TeamView({
                           "font-semibold text-orange-deep"
                       )}
                     >
-                      {student.attendancePercent}% attendance
+                      {student.attendancePercent === null
+                        ? "No sessions yet"
+                        : `${student.attendancePercent}% attendance`}
                     </span>
                     {" · "}
-                    {student.fee.kind === "overdue" ? (
-                      <span className="font-semibold text-orange-deep">
-                        Fees {student.fee.days} days overdue
-                      </span>
+                    {student.fee.kind === "paid" ? (
+                      feeText(student.fee)
                     ) : (
-                      `Paid to ${formatDayMonth(student.fee.paidTo)}`
+                      <span className="font-semibold text-orange-deep">
+                        {feeText(student.fee)}
+                      </span>
                     )}
                   </p>
                 </div>

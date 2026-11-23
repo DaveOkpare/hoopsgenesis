@@ -6,6 +6,12 @@ import {
 } from "@/features/student-attendance/api";
 import type { Id } from "@/features/types";
 
+export type {
+  AttendanceRange,
+  MyAttendance,
+  NameRef,
+} from "@/features/student-attendance/api";
+
 export const myAttendanceKeys = {
   all: (academyId: Id) => ["academies", academyId, "me", "attendance"] as const,
   range: (academyId: Id, range: AttendanceRange) =>

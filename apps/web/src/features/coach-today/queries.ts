@@ -17,22 +17,23 @@ export const coachTodayKeys = {
 
 export function recordsToReviewQueryOptions(
   academyId: Id,
-  teamIds: Id[],
-  viewerId: Id
+  teams: { id: Id; name: string }[]
 ) {
   return queryOptions({
-    queryKey: [...coachTodayKeys.records(academyId), teamIds, viewerId],
-    queryFn: () => listRecordsToReview(academyId, { teamIds, viewerId }),
+    queryKey: [
+      ...coachTodayKeys.records(academyId),
+      teams.map((t) => t.id),
+    ] as const,
+    queryFn: () => listRecordsToReview(academyId, { teams }),
   });
 }
 
 export function useVerifyRecord(academyId: Id) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { recordId: Id; verifiedBy: Id }) =>
-      verifyRecord(academyId, input),
+    mutationFn: (input: { recordId: Id }) => verifyRecord(academyId, input),
     // Every records list for the academy: this panel, the queue and the sidebar count.
-    onSuccess: () =>
+    onSettled: () =>
       queryClient.invalidateQueries({
         queryKey: ["academies", academyId, "records"],
       }),

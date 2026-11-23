@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 
 import { MobileAcademyBar } from "@/components/app-shell/academy-switcher";
+import { QueryBoundary } from "@/components/error-state";
 import { PlusIcon } from "@/components/icons";
 import {
   AttentionCard,
@@ -170,12 +171,14 @@ export function DashboardScreen({
             <TodaySessionsCard sessions={sessions} />
           </div>
           <PhoneAttentionList items={items} />
-          <UnpaidCard
-            academyId={academyId}
-            now={now}
-            periodStart={summary.outstanding.periodStart}
-            timeZone={timeZone}
-          />
+          <QueryBoundary className="max-md:hidden" what="unpaid students">
+            <UnpaidCard
+              academyId={academyId}
+              now={now}
+              periodStart={summary.outstanding.periodStart}
+              timeZone={timeZone}
+            />
+          </QueryBoundary>
         </>
       ) : (
         <div className="flex gap-4 max-md:hidden">

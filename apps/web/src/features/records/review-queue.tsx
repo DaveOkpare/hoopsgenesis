@@ -58,6 +58,7 @@ import {
 import { RejectRecordDialog } from "@/features/records/reject-dialog";
 import type { Id, RecordStatus } from "@/features/types";
 import { useActiveMembership, useViewer } from "@/features/viewer/queries";
+import { errorMessage } from "@/lib/api-client";
 import { firstName } from "@/lib/format";
 import { useIsPhone } from "@/lib/use-is-phone";
 
@@ -301,8 +302,8 @@ export function ReviewQueueScreen({
   const now = currentTime();
 
   const records = useQuery(reviewRecordsQueryOptions(academyId, scope));
-  const verify = useVerifyRecord(academyId, viewerId);
-  const reject = useRejectRecord(academyId, viewerId);
+  const verify = useVerifyRecord(academyId);
+  const reject = useRejectRecord(academyId);
   const [advance, setAdvance] = useState(true);
 
   const tab: ReviewTab = search.tab ?? "pending";
@@ -358,9 +359,7 @@ export function ReviewQueueScreen({
       );
       moveOn(selected.id);
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Couldn't verify it."
-      );
+      toast.error(errorMessage(error, "Couldn't verify it. Try again."));
     }
   }, [moveOn, selected, verify]);
 
@@ -388,9 +387,7 @@ export function ReviewQueueScreen({
         );
         moveOn(selected.id);
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Couldn't reject it."
-        );
+        toast.error(errorMessage(error, "Couldn't reject it. Try again."));
       }
     },
     [moveOn, reject, selected]

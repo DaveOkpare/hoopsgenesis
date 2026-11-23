@@ -18,7 +18,7 @@ import { useActiveMembership } from "@/features/viewer/queries";
 /*
  * Deep links:
  *   ?code=<id>      select a code (desktop panel; phone bottom sheet), e.g. ?code=code-k7pm
- *   ?new=1          "New join code" (6AE-0)
+ *   ?new=1          "New join code" (6AE-0); add &teamId=<id> to preselect a team
  *   ?created=<id>   "Code ready" for that code (6RV-0 / phone 6WV-0)
  *   ?revoke=<id>    confirm revoking that code
  */
@@ -27,6 +27,8 @@ interface JoinCodesSearch {
   created?: Id;
   new?: 1;
   revoke?: Id;
+  /** With `new`: the team to preselect. */
+  teamId?: Id;
 }
 
 function idParam(value: unknown): Id | undefined {
@@ -46,6 +48,10 @@ export const Route = createFileRoute("/_auth/admin/join-codes")({
       out.created = created;
     } else if (search.new === 1 || search.new === "1" || search.new === true) {
       out.new = 1;
+      const teamId = idParam(search.teamId);
+      if (teamId) {
+        out.teamId = teamId;
+      }
     }
     if (revoke) {
       out.revoke = revoke;
@@ -80,13 +86,14 @@ function JoinCodesPage() {
     [setSearch]
   );
   const handleCreated = useCallback(
-    (code: InvitationCode) => setSearch({ new: undefined, created: code.id }),
+    (code: InvitationCode) =>
+      setSearch({ new: undefined, teamId: undefined, created: code.id }),
     [setSearch]
   );
   const handleNewOpen = useCallback(
     (open: boolean) => {
       if (!open) {
-        setSearch({ new: undefined, created: undefined });
+        setSearch({ new: undefined, teamId: undefined, created: undefined });
       }
     },
     [setSearch]
@@ -137,6 +144,7 @@ function JoinCodesPage() {
         academyId={academy.id}
         academyName={academy.name}
         createdCode={createdCode}
+        initialTeamId={search.teamId}
         onCreated={handleCreated}
         onOpenChange={handleNewOpen}
         open={search.new === 1 || createdCode !== null}

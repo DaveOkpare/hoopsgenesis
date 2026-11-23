@@ -21,7 +21,11 @@ import {
   dueStatus,
   overdueDays,
 } from "@/features/student-fees/selectors";
-import type { DrillProgress } from "@/features/student-progress/selectors";
+import {
+  type DrillProgress,
+  formatResult,
+  formatValue,
+} from "@/features/student-progress/selectors";
 import { personLabel } from "@/features/student-records/record-data";
 import type { DateOnly } from "@/features/types";
 import { formatAmount } from "@/lib/format";
@@ -157,14 +161,13 @@ export function AttendanceTile({
         </span>
       </span>
       <span aria-hidden="true" className="flex flex-wrap gap-[6px]">
-        {summary.marks.map((attended, index) => (
+        {summary.marks.map((mark) => (
           <span
             className={cn(
               "size-[18px] shrink-0 rounded-[6px]",
-              attended ? "bg-ink" : "bg-line"
+              mark.attended ? "bg-ink" : "bg-line"
             )}
-            // biome-ignore lint/suspicious/noArrayIndexKey: one square per session, in order
-            key={index}
+            key={mark.id}
           />
         ))}
       </span>
@@ -193,7 +196,7 @@ export function ResultTile({
     const who = pending.record.recordedByPerson
       ? personLabel(pending.record.recordedByPerson)
       : "your coach";
-    note = `${pending.result.made} of ${pending.result.attempts} ${when} is waiting for ${who} to verify.`;
+    note = `${formatResult(pending.result, progress.series)} ${when} is waiting for ${who} to verify.`;
   } else if (progress.best) {
     note = `Best set on ${dayMonth(progress.best.record.recordedOn)}.`;
   }
@@ -204,16 +207,18 @@ export function ResultTile({
       </span>
       <span className="flex flex-wrap items-baseline gap-[10px]">
         <span className="font-display text-display-sm text-ink leading-[56px]">
-          {progress.best?.result.made ?? "—"}
+          {progress.best ? formatValue(progress.best.result.value) : "—"}
         </span>
-        <span className="text-base text-muted leading-5">
-          of {progress.attempts}
-        </span>
-        {progress.gain && progress.gain.amount > 0 ? (
+        {progress.suffix ? (
+          <span className="text-base text-muted leading-5">
+            {progress.suffix}
+          </span>
+        ) : null}
+        {progress.gain ? (
           <span className="font-semibold text-sm text-success leading-[18px]">
             <span aria-hidden="true">▲ </span>
             <span className="sr-only">up </span>
-            {progress.gain.amount} since {progress.gain.since}
+            {progress.gain.label} since {progress.gain.since}
           </span>
         ) : null}
       </span>

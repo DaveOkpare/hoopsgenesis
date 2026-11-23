@@ -18,14 +18,12 @@ import {
   type KeyboardEvent,
   type ReactNode,
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
 import z from "zod";
-
 import {
   type LatLng,
   MockMap,
@@ -37,6 +35,7 @@ import {
   platformAcademiesQueryOptions,
   useCreateAcademy,
 } from "@/features/owner-academies/queries";
+import { errorMessage, isApiError } from "@/lib/api-client";
 
 const TIME_ZONES = [
   { value: "Africa/Kigali", label: "Africa/Kigali" },
@@ -112,6 +111,63 @@ const DEFAULT_VALUES: FormValues = {
   attendanceRadiusM: DEFAULT_RADIUS_M,
   adminEmail: "",
 };
+
+/** Server field names (POST /admin/academies) mapped to this form's fields. */
+const SERVER_FIELDS: Record<string, keyof FormValues> = {
+  name: "name",
+  slug: "slug",
+  timezone: "timezone",
+  defaultCurrency: "defaultCurrency",
+  latitude: "latitude",
+  longitude: "latitude",
+  attendanceRadiusM: "attendanceRadiusM",
+  location: "address",
+  firstAdmin: "adminEmail",
+  "firstAdmin.email": "adminEmail",
+};
+
+/**
+ * `400 validation_failed` issues as [path, message]. The server sends `path` as a
+ * dotted string ("firstAdmin.email"); arrays are accepted too.
+ */
+function validationIssues(error: unknown): [string, string][] {
+  if (!isApiError(error, "validation_failed")) {
+    return [];
+  }
+  const issues = (error.details as { issues?: unknown } | null)?.issues;
+  if (!Array.isArray(issues)) {
+    return [];
+  }
+  return issues.flatMap((issue: { path?: unknown; message?: unknown }) => {
+    const path = Array.isArray(issue.path) ? issue.path.join(".") : issue.path;
+    return typeof path === "string" && typeof issue.message === "string"
+      ? [[path, issue.message] as [string, string]]
+      : [];
+  });
+}
+
+/** Field errors from the server: `slug_taken`, admin problems, or a validation error. */
+function serverFieldErrors(
+  error: unknown
+): Partial<Record<keyof FormValues, string>> {
+  if (isApiError(error, "slug_taken")) {
+    return { slug: "This address is taken" };
+  }
+  if (
+    isApiError(error, "platform_admin_cannot_be_member") ||
+    isApiError(error, "user_not_found")
+  ) {
+    return { adminEmail: error instanceof Error ? error.message : "" };
+  }
+  const result: Partial<Record<keyof FormValues, string>> = {};
+  for (const [path, message] of validationIssues(error)) {
+    const name = SERVER_FIELDS[path];
+    if (name && !result[name]) {
+      result[name] = message;
+    }
+  }
+  return result;
+}
 
 function fieldError(field: AnyFieldApi): string | undefined {
   const error = field.state.meta.errors[0] as { message?: string } | undefined;
@@ -439,12 +495,8 @@ const selectLocation = (state: { values: FormValues }) => ({
 const selectSubmitting = (state: { isSubmitting: boolean }) =>
   state.isSubmitting;
 
-/** "[Owner] Create academy" (PA-1). `showErrors` runs validation on load (for review). */
-export function CreateAcademyForm({
-  showErrors = false,
-}: {
-  showErrors?: boolean;
-}) {
+/** "[Owner] Create academy" (PA-1). */
+export function CreateAcademyForm() {
   const navigate = useNavigate();
   const { data: academies } = useSuspenseQuery(platformAcademiesQueryOptions());
   const { data: places } = useSuspenseQuery(placesQueryOptions());
@@ -484,20 +536,23 @@ export function CreateAcademyForm({
           params: { academyId: row.academy.id },
         });
       } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : "Could not create the academy"
-        );
+        const fieldErrors = serverFieldErrors(error);
+        const entries = Object.entries(fieldErrors) as [
+          keyof FormValues,
+          string,
+        ][];
+        for (const [name, message] of entries) {
+          form.setFieldMeta(name, (meta) => ({
+            ...meta,
+            errorMap: { ...meta.errorMap, onSubmit: { message } },
+          }));
+        }
+        if (entries.length === 0) {
+          toast.error(errorMessage(error, "Could not create the academy"));
+        }
       }
     },
   });
-
-  useEffect(() => {
-    if (showErrors) {
-      form.handleSubmit();
-    }
-  }, [showErrors, form]);
 
   const handleNameChange = useCallback(
     (name: string) => {

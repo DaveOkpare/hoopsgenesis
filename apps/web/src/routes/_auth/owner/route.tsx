@@ -17,7 +17,11 @@ export const Route = createFileRoute("/_auth/owner")({
 
 function OwnerLayout() {
   // The sidebar count is the number of academies in the console.
-  const { data: academies } = useQuery(platformAcademiesQueryOptions());
+  // A failed count must never take down the shell: it just shows no badge.
+  const { data: academies } = useQuery({
+    ...platformAcademiesQueryOptions(),
+    throwOnError: false,
+  });
   const counts = academies ? { academies: academies.length } : {};
   return (
     <AppShell config={ownerShell} counts={counts}>

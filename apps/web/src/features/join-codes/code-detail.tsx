@@ -19,6 +19,7 @@ import {
 } from "@/features/join-codes/describe";
 import {
   CODE_LIMITS,
+  canExtendJoinCodes,
   type InvitationCode,
   useExtendJoinCode,
 } from "@/features/join-codes/queries";
@@ -275,7 +276,8 @@ export function CodeDetail({
       <Joiners code={code} now={now} timeZone={timeZone} />
       {isActive ? (
         <div className="flex gap-2 border-line border-t pt-4">
-          {code.expiresAt ? (
+          {/* No endpoint changes a code's expiry, so "Extend" shows only in preview. */}
+          {code.expiresAt && canExtendJoinCodes ? (
             <ExtendMenu
               academyId={academyId}
               code={code}

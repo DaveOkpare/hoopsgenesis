@@ -11,25 +11,22 @@ import {
 import { cn } from "@hoops-genesis/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 
-import { useViewer } from "@/features/viewer/queries";
+import { useSignOut, useViewer } from "@/features/viewer/queries";
 import { viewerSubtitle } from "@/features/viewer/selectors";
-import { authClient } from "@/lib/auth-client";
 import { initials } from "@/lib/format";
-import { isUiPreview } from "@/lib/preview";
 
-function useSignOut() {
+function useSignOutAndLeave() {
   const navigate = useNavigate();
-  return async () => {
-    if (!isUiPreview) {
-      await authClient.signOut();
-    }
-    await navigate({ to: "/login" });
-  };
+  const signOut = useSignOut();
+  return () =>
+    signOut.mutate(undefined, {
+      onSettled: () => navigate({ to: "/login" }),
+    });
 }
 
 function MenuItems() {
   const viewer = useViewer();
-  const signOut = useSignOut();
+  const signOut = useSignOutAndLeave();
   return (
     <>
       <DropdownMenuGroup>
@@ -86,16 +83,29 @@ export function SidebarUserMenu({ tone }: { tone: "light" | "dark" }) {
   );
 }
 
-/** Phone header avatar (36px ink circle); opens the same account menu. */
-export function AvatarUserMenu() {
+/**
+ * Header avatar (36px circle) on phone home screens and the tablet top bar; opens the
+ * same account menu. tone="dark" is the white avatar on the owner's ink top bar.
+ */
+export function AvatarUserMenu({
+  tone = "light",
+}: {
+  tone?: "light" | "dark";
+} = {}) {
   const viewer = useViewer();
+  const dark = tone === "dark";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="Account"
-        className="cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2"
+        className={cn(
+          "cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+          dark
+            ? "focus-visible:ring-white focus-visible:ring-offset-ink"
+            : "focus-visible:ring-ink"
+        )}
       >
-        <Avatar size={36} tone="ink">
+        <Avatar size={36} tone={dark ? "white" : "ink"}>
           <AvatarFallback>{initials(viewer.user.name)}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>

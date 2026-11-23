@@ -22,7 +22,11 @@ import {
 import { toast } from "sonner";
 
 import { BellIcon } from "@/components/coach/coach-icons";
-import { sessionLongLabel, weekdayPlural } from "@/features/sessions/model";
+import {
+  sessionErrorMessage,
+  sessionLongLabel,
+  weekdayPlural,
+} from "@/features/sessions/model";
 import { type Session, useCancelSession } from "@/features/sessions/queries";
 import type { Id } from "@/features/types";
 
@@ -148,16 +152,14 @@ export function CancelDialog({
       {
         onSuccess: () => {
           toast.success(
-            scope === "series"
-              ? `Weekly series deleted. ${students} students notified.`
-              : `Session cancelled. ${students} students notified.`
+            scope === "series" ? "Weekly series deleted." : "Session cancelled."
           );
           onCancelled(scope);
         },
-        onError: (error) => toast.error(error.message),
+        onError: (error) => toast.error(sessionErrorMessage(error)),
       }
     );
-  }, [mutate, onCancelled, reasonText, scope, session, students]);
+  }, [mutate, onCancelled, reasonText, scope, session]);
 
   return (
     <Dialog onOpenChange={handleOpenChange} open={open}>

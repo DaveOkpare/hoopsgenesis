@@ -1,7 +1,8 @@
-import { buttonVariants } from "@hoops-genesis/ui/components/button";
+import { Button, buttonVariants } from "@hoops-genesis/ui/components/button";
 import { cn } from "@hoops-genesis/ui/lib/utils";
-import { Link } from "@tanstack/react-router";
-
+import { Link, useRouter } from "@tanstack/react-router";
+import { useCallback } from "react";
+import { toast } from "sonner";
 import {
   AuthIconDisc,
   AuthTitle,
@@ -10,7 +11,66 @@ import {
 } from "@/components/auth/auth-parts";
 import { inviteLifetimeHours } from "@/features/invitations/format";
 import type { InvitationDetails } from "@/features/invitations/queries";
+import { useSignOut } from "@/features/viewer/queries";
+import { errorMessage } from "@/lib/api-client";
 import { formatDayMonth } from "@/lib/format";
+
+/**
+ * Signed in with another email than the one invited: Better Auth shows an invitation
+ * only to its recipient. Signing out brings back the create-account form.
+ */
+export function WrongAccountNotice({
+  invitationId,
+  signedInAs,
+}: {
+  invitationId: string;
+  signedInAs: string;
+}) {
+  const router = useRouter();
+  const signOut = useSignOut();
+  const handleSignOut = useCallback(async () => {
+    try {
+      await signOut.mutateAsync();
+    } catch (error) {
+      toast.error(errorMessage(error, "Couldn’t sign out. Try again."));
+      return;
+    }
+    await router.invalidate();
+  }, [router, signOut]);
+  return (
+    <div className="flex flex-col gap-10 max-md:flex-1 max-md:justify-between max-md:pt-12">
+      <div className="flex flex-col gap-[22px]">
+        <AuthIconDisc>
+          <ClockIcon />
+        </AuthIconDisc>
+        <AuthTitle>This invite is for someone else</AuthTitle>
+        <p className="text-[17px] text-ink-soft leading-[25px]">
+          You're signed in as{" "}
+          <span className="font-semibold text-ink">{signedInAs}</span>, but this
+          invite was sent to another email address. Sign out, then create your
+          account or sign in with the invited email.
+        </p>
+      </div>
+      <div className="flex flex-col gap-3">
+        <Button
+          className={authSubmitClass}
+          disabled={signOut.isPending}
+          onClick={handleSignOut}
+          size="xl"
+        >
+          Sign out
+        </Button>
+        <Link
+          className="text-center text-muted text-sm leading-[18px] underline"
+          search={{ invitationId }}
+          to="/login"
+        >
+          Sign in with the invited email
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 /*
  * Invite links that can't be used: expired (Paper 5BQ-0), already accepted, or not found.

@@ -21,7 +21,7 @@ import {
   useRevokeJoinCode,
 } from "@/features/join-codes/queries";
 import type { Id } from "@/features/types";
-import { useViewer } from "@/features/viewer/queries";
+import { errorMessage } from "@/lib/api-client";
 
 const MAX_REASON = 500;
 
@@ -44,7 +44,6 @@ function RevokeForm({
   code: InvitationCode;
   onDone: () => void;
 }) {
-  const viewer = useViewer();
   const revoke = useRevokeJoinCode();
   const form = useForm({
     defaultValues: { reason: "" },
@@ -55,7 +54,6 @@ function RevokeForm({
           academyId,
           id: code.id,
           reason: value.reason.trim() || undefined,
-          revokedById: viewer.user.id,
         });
         toast.success(`${code.code} is turned off.`);
         onDone();
@@ -63,7 +61,7 @@ function RevokeForm({
         toast.error(
           joinCodeErrorCode(error) === "already_revoked"
             ? "This code was already revoked."
-            : "Couldn't revoke the code. Try again."
+            : errorMessage(error, "Couldn't revoke the code. Try again.")
         );
       }
     },

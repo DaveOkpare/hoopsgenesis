@@ -14,6 +14,7 @@ import {
 } from "@/components/auth/auth-parts";
 import { BrandMark } from "@/components/brand-mark";
 import { FormTextField } from "@/components/form-text-field";
+import { authErrorMessage, errorMessage } from "@/lib/api-client";
 import { authClient } from "@/lib/auth-client";
 
 const MIN_NAME = 2;
@@ -100,15 +101,22 @@ export function JoinSignUpForm({
     defaultValues: { name: "", email: "", password: "" },
     validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
-      await authClient.signUp.email(
-        { ...value, name: value.name.trim() },
-        {
-          onSuccess: onSignedUp,
-          onError: (error) => {
-            toast.error(error.error.message || error.error.statusText);
-          },
-        }
-      );
+      try {
+        await authClient.signUp.email(
+          { ...value, name: value.name.trim() },
+          {
+            onSuccess: onSignedUp,
+            onError: (error) => {
+              toast.error(authErrorMessage(error.error));
+            },
+          }
+        );
+      } catch (error) {
+        // fetch() itself failed (offline): Better Auth rejects instead of onError.
+        toast.error(
+          errorMessage(error, "Couldn't create your account. Try again.")
+        );
+      }
     },
   });
   const handleSubmit = useCallback(

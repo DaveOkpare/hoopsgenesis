@@ -17,11 +17,11 @@ import { LogResultForm } from "@/features/results/components/log-result-form";
 import { type DrillId, isDrillId } from "@/features/results/templates";
 import { parseAtParam, useSessionClock } from "@/features/sessions/clock";
 import { localDate } from "@/features/sessions/time";
-import { useActiveMembership, useViewer } from "@/features/viewer/queries";
+import { useActiveMembership } from "@/features/viewer/queries";
 
 interface LogResultSearch {
   at?: string;
-  /** Template: free_throws | three_point | dribbling. */
+  /** Template chip id (see features/results/templates.ts). */
   drill?: DrillId;
   /** Preselected student (from the team page row menu). */
   student?: string;
@@ -40,7 +40,6 @@ function LogResultPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const router = useRouter();
-  const viewer = useViewer();
   const membership = useActiveMembership();
   const now = useSessionClock();
   const handleStudent = useCallback(
@@ -86,14 +85,13 @@ function LogResultPage() {
       </PageHeader>
       <LogResultForm
         academyId={membership.academy.id}
-        drill={search.drill ?? "free_throws"}
+        drill={search.drill}
         onDrillChange={handleDrill}
         onSaved={handleSaved}
         onStudentChange={handleStudent}
         studentId={search.student}
         teams={membership.teams}
         today={localDate(now, membership.academy.timezone)}
-        viewerId={viewer.user.id}
       />
     </>
   );

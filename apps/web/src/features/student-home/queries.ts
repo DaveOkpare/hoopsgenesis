@@ -17,10 +17,13 @@ export function isSessionState(value: unknown): value is SessionState {
 
 export function nextSessionQueryOptions(
   academyId: Id,
-  preview: SessionState | undefined
+  preview: SessionState | undefined,
+  timeZone: string
 ) {
   return queryOptions({
     queryKey: ["academies", academyId, "me", "next-session", preview] as const,
-    queryFn: () => getNextSession(academyId, { preview }),
+    queryFn: () => getNextSession(academyId, { preview, timeZone }),
+    // "Starts in 19 min" and the open/closed window move with the clock.
+    refetchInterval: 60_000,
   });
 }

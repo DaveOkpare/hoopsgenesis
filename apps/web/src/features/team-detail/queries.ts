@@ -79,7 +79,7 @@ function useInvalidateAcademy(academyId: Id) {
 export function useAddTeamMember(academyId: Id) {
   const invalidate = useInvalidateAcademy(academyId);
   return useMutation({
-    mutationFn: (input: { teamId: Id; memberId: Id }) =>
+    mutationFn: (input: { teamId: Id; userId: Id; fromTeamId?: Id | null }) =>
       addTeamMember(academyId, input),
     onSuccess: invalidate,
   });
@@ -88,7 +88,7 @@ export function useAddTeamMember(academyId: Id) {
 export function useRemoveTeamMember(academyId: Id) {
   const invalidate = useInvalidateAcademy(academyId);
   return useMutation({
-    mutationFn: (input: { teamId: Id; memberId: Id }) =>
+    mutationFn: (input: { teamId: Id; userId: Id }) =>
       removeTeamMember(academyId, input),
     onSuccess: invalidate,
   });

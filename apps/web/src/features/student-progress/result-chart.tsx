@@ -4,6 +4,7 @@ import { dayMonth } from "@/features/student-calendar/dates";
 
 import {
   type DrillProgress,
+  formatResult,
   pointLabel,
 } from "@/features/student-progress/selectors";
 import type { DateOnly } from "@/features/types";
@@ -39,7 +40,10 @@ export function ResultChart({
 }) {
   const id = useId();
   const { points, best } = progress;
-  const values = points.map((p) => p.result.made);
+  // Plot so that better is always up (a faster sprint time sits higher).
+  const sign = progress.series.better === "lower" ? -1 : 1;
+  const plotted = (p: (typeof points)[number]) => sign * p.result.value;
+  const values = points.map(plotted);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const scaleY = height / 140;
@@ -54,12 +58,12 @@ export function ResultChart({
       ? (top + bottom) / 2
       : bottom - ((value - min) / (max - min)) * (bottom - top);
   const path = points
-    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i)} ${y(p.result.made)}`)
+    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i)} ${y(plotted(p))}`)
     .join(" ");
   const description = points
     .map(
       (p) =>
-        `${dayMonth(p.record.recordedOn)}: ${p.result.made} of ${p.result.attempts}${p.record.status === "pending" ? " (waiting for review)" : ""}${p === best ? " (best)" : ""}`
+        `${dayMonth(p.record.recordedOn)}: ${formatResult(p.result, progress.series)}${p.record.status === "pending" ? " (waiting for review)" : ""}${p === best ? " (best)" : ""}`
     )
     .join("; ");
 
@@ -90,7 +94,7 @@ export function ResultChart({
         ) : null}
         {points.map((p, i) => {
           const cx = x(i);
-          const cy = y(p.result.made);
+          const cy = y(plotted(p));
           if (p === best) {
             return (
               <circle

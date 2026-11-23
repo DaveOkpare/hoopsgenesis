@@ -23,6 +23,7 @@ import {
   useSkipSetupStep,
 } from "@/features/setup/queries";
 import type { Academy } from "@/features/types";
+import { errorMessage } from "@/lib/api-client";
 
 interface StepCopy {
   cta: string;
@@ -245,6 +246,10 @@ function SetupChecklistCard({
       {
         onSuccess: () =>
           toast.success(`Skipped “${STEP_COPY[active.id].title}” for now`),
+        onError: (error) =>
+          toast.error(
+            errorMessage(error, "Couldn’t skip that step. Try again.")
+          ),
       }
     );
   }, [active, academy.id, snapshot, skip]);

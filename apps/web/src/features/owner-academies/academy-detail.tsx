@@ -18,13 +18,15 @@ import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 import {
+  OWNER_CAN_REPLACE_QR,
   type PlatformAcademyDetail,
   platformAcademyQueryOptions,
-  referenceNow,
   useRegenerateAcademyQr,
 } from "@/features/owner-academies/queries";
 import type { Id } from "@/features/types";
+import { errorMessage } from "@/lib/api-client";
 import { formatDayMonth, formatRelativeDay } from "@/lib/format";
+import { appNow } from "@/lib/preview";
 
 function formatCreated(value: string, timeZone: string): string {
   return new Intl.DateTimeFormat("en-GB", {
@@ -58,6 +60,10 @@ function ReplaceQrDialog({ detail }: { detail: PlatformAcademyDetail }) {
             description: `Ask the ${academy.shortName} admin to print the new one.`,
           });
         },
+        onError: (error) =>
+          toast.error(
+            errorMessage(error, "The QR code couldn't be replaced. Try again.")
+          ),
       }
     );
   }, [regenerate, academy.id, academy.shortName]);
@@ -154,7 +160,7 @@ export function AcademyDetail({
     );
   }
   const { academy, counts, recentActivity } = detail;
-  const now = referenceNow();
+  const now = appNow();
   return (
     <section
       aria-labelledby="academy-detail-title"
@@ -193,7 +199,9 @@ export function AcademyDetail({
           </h3>
           <p className="text-[13px] text-muted leading-4">{qrLine(detail)}</p>
         </div>
-        <ReplaceQrDialog detail={detail} />
+        {/* No owner route replaces the QR code (only the academy admin's
+            /academy-qr/regenerate); the owner uses "View as" on the admin. */}
+        {OWNER_CAN_REPLACE_QR ? <ReplaceQrDialog detail={detail} /> : null}
       </div>
       <div className="flex flex-col">
         <h3 className="pb-2 font-semibold text-[13px] text-muted uppercase leading-4 tracking-label">

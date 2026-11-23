@@ -41,7 +41,7 @@ function SessionPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const viewer = useViewer();
-  const academyId = useActiveMembership()?.academy.id ?? "";
+  const academy = useActiveMembership()?.academy;
   const now = useSessionClock();
 
   const openSheet = useCallback(
@@ -71,9 +71,12 @@ function SessionPage() {
     [closeSheet, navigate, search.at]
   );
 
+  if (!academy) {
+    return null;
+  }
   return (
     <SessionScreen
-      academyId={academyId}
+      academy={academy}
       date={search.date}
       eventId={eventId}
       now={now}

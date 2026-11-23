@@ -111,14 +111,12 @@ export function MonthGrid({
         <tbody>
           {weeks.map((week) => (
             <tr key={week.find(Boolean) ?? "empty"}>
-              {week.map((date, index) => {
+              {WEEKDAYS.map((weekday, column) => {
+                const date = week[column];
                 if (!date) {
+                  // A padding cell has no date; its weekday column is its identity.
                   return (
-                    <td
-                      className="h-[54px]"
-                      // biome-ignore lint/suspicious/noArrayIndexKey: empty padding cells have no date
-                      key={`pad-${index}`}
-                    />
+                    <td className="h-[54px]" key={`pad-${weekday.long}`} />
                   );
                 }
                 const cell = cells.get(date) ?? EMPTY_CELL;

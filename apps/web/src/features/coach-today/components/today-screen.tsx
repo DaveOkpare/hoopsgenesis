@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 
 import { MobileAcademyBar } from "@/components/app-shell/academy-switcher";
+import { QueryBoundary } from "@/components/error-state";
 import { PlusIcon } from "@/components/icons";
 import { TeamMonthCard } from "@/features/coach-today/components/team-month-card";
 import {
@@ -59,11 +60,14 @@ export function TodayScreen({
   const today = localDate(now, timeZone);
   const teamIds = membership.teams.map((t) => t.id);
   const sessionsQuery = useQuery(
-    sessionsOnQueryOptions(academyId, today, teamIds, asOfKey(now))
+    sessionsOnQueryOptions(membership.academy, today, teamIds, asOfKey(now))
   );
-  const recordsQuery = useQuery(
-    recordsToReviewQueryOptions(academyId, teamIds, viewerId)
-  );
+  // Only the phone nudge's count here (left out if it fails); the desktop card loads
+  // the same query inside its own error boundary.
+  const recordsQuery = useQuery({
+    ...recordsToReviewQueryOptions(academyId, membership.teams),
+    throwOnError: false,
+  });
   const sessionsLoading = sessionsQuery.data === undefined;
   const sessions = sessionsQuery.data ?? [];
   const records = recordsQuery.data ?? [];
@@ -155,21 +159,20 @@ export function TodayScreen({
           sessions={sessions}
           viewerId={viewerId}
         />
-        <RecordsCard
-          academyId={academyId}
-          loading={recordsQuery.data === undefined}
-          records={records}
-          viewerId={viewerId}
-        />
+        <QueryBoundary className="min-w-0 grow basis-0" what="records">
+          <RecordsCard academyId={academyId} teams={membership.teams} />
+        </QueryBoundary>
       </div>
       {tableTeam ? (
-        <TeamMonthCard
-          academyId={academyId}
-          onTeamChange={onTeamChange}
-          teamId={tableTeam}
-          teams={membership.teams}
-          today={today}
-        />
+        <QueryBoundary className="max-md:hidden" what="the team’s month">
+          <TeamMonthCard
+            academyId={academyId}
+            onTeamChange={onTeamChange}
+            teamId={tableTeam}
+            teams={membership.teams}
+            today={today}
+          />
+        </QueryBoundary>
       ) : null}
     </>
   );

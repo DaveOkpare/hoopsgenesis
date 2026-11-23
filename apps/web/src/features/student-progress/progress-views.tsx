@@ -4,7 +4,11 @@ import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon } from "@/components/student/icons";
 import { dayMonth, toDateOnly } from "@/features/student-calendar/dates";
 import { ResultChart } from "@/features/student-progress/result-chart";
-import type { DrillProgress } from "@/features/student-progress/selectors";
+import {
+  type DrillProgress,
+  formatResult,
+  formatValue,
+} from "@/features/student-progress/selectors";
 import type { StudentRecordView } from "@/features/student-records/queries";
 import {
   academicData,
@@ -60,18 +64,20 @@ export function ChartCard({
           </h2>
           <p className="flex items-baseline gap-1">
             <span className="font-display text-[52px] text-ink leading-[95%]">
-              {progress.best?.result.made ?? "—"}
+              {progress.best ? formatValue(progress.best.result.value) : "—"}
             </span>
-            <span className="font-semibold text-base text-muted leading-5">
-              of {progress.attempts}
-            </span>
+            {progress.suffix ? (
+              <span className="font-semibold text-base text-muted leading-5">
+                {progress.suffix}
+              </span>
+            ) : null}
           </p>
         </div>
-        {progress.gain && progress.gain.amount > 0 ? (
+        {progress.gain ? (
           <p className="font-semibold text-sm text-success leading-[18px]">
             <span aria-hidden="true">▲ </span>
             <span className="sr-only">Up </span>
-            {progress.gain.amount} since {progress.gain.since}
+            {progress.gain.label} since {progress.gain.since}
           </p>
         ) : null}
       </div>
@@ -131,7 +137,7 @@ export function ResultList({
           >
             <div className="flex min-w-0 flex-col">
               <p className="font-semibold text-[15px] text-ink leading-[18px]">
-                {result.made} of {result.attempts}
+                {formatResult(result, progress.series)}
                 {progress.best?.record.id === record.id ? (
                   <span className="text-orange-deep">
                     {" "}

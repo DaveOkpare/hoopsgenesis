@@ -383,7 +383,11 @@ export function ActivityLogScreen({
     [search.person, search.type, search.date]
   );
   const log = useQuery(auditLogQueryOptions(academyId, params));
-  const actors = useQuery(auditActorsQueryOptions(academyId));
+  // Only the names in the "Person" filter: left out if it fails.
+  const actors = useQuery({
+    ...auditActorsQueryOptions(academyId),
+    throwOnError: false,
+  });
 
   /** null = the design's default: the newest entry open. */
   const [openIds, setOpenIds] = useState<Set<Id> | null>(null);

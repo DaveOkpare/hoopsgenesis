@@ -29,10 +29,10 @@ export function academyQrQueryOptions(academyId: Id) {
 }
 
 /** Replace the code: the new one shows straight away and the activity log gains a row. */
-export function useRegenerateAcademyQr(academyId: Id, actorId: Id) {
+export function useRegenerateAcademyQr(academyId: Id) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => regenerateAcademyQr(academyId, actorId),
+    mutationFn: () => regenerateAcademyQr(academyId),
     onSuccess: async (data) => {
       queryClient.setQueryData<AcademyQrDetails>(
         academyQrKeys.detail(academyId),

@@ -16,7 +16,7 @@ import {
 import { NewEventForm } from "@/features/events/components/new-event-form";
 import { parseAtParam, useSessionClock } from "@/features/sessions/clock";
 import { localDate } from "@/features/sessions/time";
-import { useActiveMembership, useViewer } from "@/features/viewer/queries";
+import { useActiveMembership } from "@/features/viewer/queries";
 
 const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -42,7 +42,6 @@ export const Route = createFileRoute("/_auth/coach/calendar/new")({
 function NewEventPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const viewer = useViewer();
   const membership = useActiveMembership();
   const now = useSessionClock();
   const handleCreated = useCallback(
@@ -77,10 +76,9 @@ function NewEventPage() {
       <div className="w-full max-w-[560px]">
         <NewEventForm
           academyId={membership.academy.id}
-          defaults={{ teamId: search.team, date: search.date ?? today }}
+          defaults={{ teamId: search.team, date: search.date ?? today, today }}
           onCreated={handleCreated}
           teams={membership.teams}
-          viewerId={viewer.user.id}
         />
       </div>
     </>

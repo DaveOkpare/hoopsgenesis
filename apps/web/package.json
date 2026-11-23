@@ -8,6 +8,7 @@
     "check-types": "vite build && tsc --noEmit",
     "dev": "vite dev",
     "env:generate": "varlock codegen",
+    "seed:dev": "tsx scripts/seed-dev.ts",
     "serve": "vite preview",
     "test": "vitest run",
     "test:e2e": "vitest run --config e2e/vitest.config.ts",

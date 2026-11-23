@@ -39,10 +39,11 @@ function metaLine(record: StudentRecordView, timeZone: string): string {
   if (record.status === "pending") {
     return `${uploaded} · waiting for your coach to review it`;
   }
-  if (!record.reviewedAt) {
-    return uploaded;
-  }
   const by = record.reviewedBy ? ` by ${personLabel(record.reviewedBy)}` : "";
+  if (!record.reviewedAt) {
+    // The server records who reviewed it, not when.
+    return by ? `${uploaded} · reviewed${by}` : uploaded;
+  }
   return `${uploaded} · reviewed ${dayMonth(toDateOnly(record.reviewedAt, timeZone))}${by}`;
 }
 
@@ -52,6 +53,8 @@ function detailRows(data: AcademicData): { label: string; value: string }[] {
       ? [
           { label: "School", value: data.school },
           { label: "Term", value: data.term },
+          { label: "School year", value: data.schoolYear },
+          { label: "Subjects", value: data.subjects },
           {
             label: "Average",
             value:
@@ -64,6 +67,7 @@ function detailRows(data: AcademicData): { label: string; value: string }[] {
                 ? `${data.position} of ${data.classSize}`
                 : null,
           },
+          { label: "Notes", value: data.notes },
         ]
       : [
           { label: "Title", value: data.title },
@@ -143,6 +147,21 @@ function RecordDetail({
                 {fileMeta}
               </span>
             ) : null}
+            {record.fileUrl ? (
+              <a
+                className="self-start rounded-sm font-semibold text-[13px] text-ink leading-4 underline decoration-1 underline-offset-2 outline-none hover:decoration-2 focus-visible:ring-2 focus-visible:ring-ink"
+                href={record.fileUrl}
+                rel="noopener"
+                target="_blank"
+              >
+                Open file
+              </a>
+            ) : null}
+            {record.hasFile || data.fileName ? null : (
+              <span className="text-[13px] text-muted leading-4">
+                No file attached
+              </span>
+            )}
           </span>
         </div>
 
@@ -190,6 +209,7 @@ function RecordDetail({
 function RecordPage() {
   const { recordId } = Route.useParams();
   const { academyId, timeZone } = useAcademyClock();
+  // A failure throws to the route's error screen (404: "Page not found").
   const record = useQuery(recordQueryOptions(academyId, recordId));
   const kindLabel = record.data
     ? ACADEMIC_KIND_LABEL[academicData(record.data).kind]
@@ -208,16 +228,6 @@ function RecordPage() {
           <Skeleton className="h-6 w-20 rounded-full" />
           <Skeleton className="h-[92px] rounded-md" />
           <Skeleton className="h-[92px] rounded-[20px]" />
-        </div>
-      ) : null}
-      {record.status === "error" ? (
-        <div className="flex flex-col gap-2 rounded-lg bg-fog p-6">
-          <h1 className="font-semibold text-ink text-lg leading-6">
-            We couldn’t find that record
-          </h1>
-          <p className="text-muted text-sm leading-5">
-            It may have been deleted. Your records are under My results.
-          </p>
         </div>
       ) : null}
       {record.data ? (

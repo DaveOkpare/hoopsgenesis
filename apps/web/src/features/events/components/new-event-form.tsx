@@ -30,6 +30,7 @@ import {
 } from "@/features/events/components/picker-row";
 import {
   type EventType,
+  eventErrorMessage,
   eventLocationsQueryOptions,
   useCreateEvents,
 } from "@/features/events/queries";
@@ -421,17 +422,20 @@ const selectSubmit = (state: { isSubmitting: boolean }) => state.isSubmitting;
 export function NewEventForm({
   academyId,
   teams,
-  viewerId,
   defaults,
   onCreated,
 }: {
   academyId: Id;
   teams: Pick<Team, "id" | "name">[];
-  viewerId: Id;
-  defaults: { teamId?: Id; date: DateOnly };
+  defaults: { teamId?: Id; date: DateOnly; today: DateOnly };
   onCreated: (firstDate: DateOnly) => void;
 }) {
-  const locations = useQuery(eventLocationsQueryOptions(academyId));
+  // Only suggestions for the place field ("Court 1" otherwise): a failure must not
+  // replace a half-filled form with an error.
+  const locations = useQuery({
+    ...eventLocationsQueryOptions(academyId, defaults.today),
+    throwOnError: false,
+  });
   const create = useCreateEvents(academyId);
   const { mutateAsync } = create;
 
@@ -454,7 +458,6 @@ export function NewEventForm({
       const dates = weeklyDates(parsed.date, parsed.repeatUntil);
       try {
         await mutateAsync({
-          createdBy: viewerId,
           dates,
           event: {
             title: parsed.title,
@@ -475,9 +478,7 @@ export function NewEventForm({
         );
         onCreated(parsed.date);
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Could not create the event"
-        );
+        toast.error(eventErrorMessage(error));
       }
     },
   });

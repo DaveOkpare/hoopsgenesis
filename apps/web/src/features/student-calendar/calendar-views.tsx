@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { ChevronLeftIcon, ChevronRightIcon } from "@/components/student/icons";
+import type { MyAttendance } from "@/features/student-attendance/queries";
 import {
   addDays,
   addMonths,
@@ -25,7 +26,7 @@ import {
   eventsByDay,
   isCancelledOn,
 } from "@/features/student-calendar/selectors";
-import type { AttendanceRecord, Country, DateOnly } from "@/features/types";
+import type { Country, DateOnly } from "@/features/types";
 
 const DAYS_IN_WEEK = 7;
 
@@ -48,12 +49,12 @@ function weekLabel(weekStart: DateOnly, today: DateOnly): string {
   return `Week of ${dayMonth(weekStart)}`;
 }
 
-function attendanceByDay(rows: AttendanceRecord[]) {
+function attendanceByDay(rows: MyAttendance[]) {
   return new Map(rows.map((row) => [`${row.eventId}:${row.sessionDate}`, row]));
 }
 
 interface ViewProps {
-  attendance: AttendanceRecord[];
+  attendance: MyAttendance[];
   country: Country;
   events: StudentEvent[];
   timeZone: string;

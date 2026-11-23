@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { FilePicker } from "@/features/student-records/file-picker";
 import {
   type AcademicKind,
+  type RecordTemplate,
   useUploadRecord,
 } from "@/features/student-records/queries";
 import { ACADEMIC_KIND_LABEL } from "@/features/student-records/record-data";
@@ -23,10 +24,12 @@ import { uploadProblem } from "@/features/student-records/upload-rules";
 import {
   emptyUploadForm,
   recordData,
+  templateFields,
   type UploadFormValues,
-  uploadSchema,
+  uploadSchemaFor,
 } from "@/features/student-records/upload-schema";
 import type { DateOnly, Id } from "@/features/types";
+import { errorMessage, isApiError } from "@/lib/api-client";
 
 /*
  * "Upload a record" (ST-6, 44B-0): pick a type, choose the file, fill the template's
@@ -34,6 +37,33 @@ import type { DateOnly, Id } from "@/features/types";
  */
 
 const KINDS: AcademicKind[] = ["report_card", "certificate", "other"];
+
+/** Server field (`data.<name>`) -> form field, for the server's validation errors. */
+const SERVER_FIELDS: Record<string, keyof UploadFormValues> = {
+  schoolName: "school",
+  term: "term",
+  schoolYear: "schoolYear",
+  subjects: "subjects",
+  averageScore: "average",
+};
+
+function formFieldFor(path: string): keyof UploadFormValues | null {
+  const [, field] = path.split(".");
+  return field ? (SERVER_FIELDS[field] ?? null) : null;
+}
+
+/** 400 `invalid_record_data` issues (`data.term`, ...) as form field errors. */
+function serverFieldErrors(error: unknown): [keyof UploadFormValues, string][] {
+  if (!isApiError(error, "invalid_record_data")) {
+    return [];
+  }
+  const issues = (error.details as { issues?: unknown } | null)?.issues;
+  return (Array.isArray(issues) ? issues : []).flatMap((issue: unknown) => {
+    const { path, message } = issue as { path?: string; message?: string };
+    const field = path ? formFieldFor(path) : null;
+    return field && message ? [[field, message] as const] : [];
+  }) as [keyof UploadFormValues, string][];
+}
 
 function errorText(field: AnyFieldApi): string | null {
   const [first] = field.state.meta.errors as (
@@ -123,39 +153,61 @@ export function UploadForm({
   studentId,
   today,
   initial,
+  templates,
 }: {
   academyId: Id;
   studentId: Id;
   today: DateOnly;
   initial?: Partial<UploadFormValues>;
+  /** Academic record templates (GET /record-templates): which kinds and fields exist. */
+  templates: RecordTemplate[];
 }) {
   const navigate = useNavigate();
   const upload = useUploadRecord();
+  const templateFor = (k: AcademicKind) =>
+    templates.find((template) => template.key === k);
+  const kinds = KINDS.filter((k) => templateFor(k));
+  const fieldsFor = (k: AcademicKind) => templateFields(templateFor(k));
 
   const form = useForm({
     defaultValues: { ...emptyUploadForm, ...initial },
-    validators: { onSubmit: uploadSchema },
-    onSubmit: async ({ value }) => {
+    validators: { onSubmit: uploadSchemaFor(fieldsFor) },
+    onSubmit: async ({ value, formApi }) => {
       if (!value.file) {
         return;
       }
       try {
-        const record = await upload.mutateAsync({
+        const { record, fileSaved } = await upload.mutateAsync({
           academyId,
           studentId,
           file: value.file,
           recordedOn: today,
-          data: recordData(value),
+          schemaVersion: templateFor(value.kind)?.schemaVersion ?? 1,
+          data: recordData(value, fieldsFor(value.kind)),
         });
-        toast.success("Sent for review");
+        if (fileSaved) {
+          toast.success("Sent for review");
+        } else {
+          // 503 storage_not_configured: the details were saved, the file was not.
+          toast.warning(
+            "Sent for review without the file: file uploads aren’t set up yet. Show your coach the paper copy."
+          );
+        }
         await navigate({
           to: "/student/records/$recordId",
           params: { recordId: record.id },
         });
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Upload failed. Try again."
-        );
+        const fieldErrors = serverFieldErrors(error);
+        for (const [field, message] of fieldErrors) {
+          formApi.setFieldMeta(field, (meta) => ({
+            ...meta,
+            errorMap: { ...meta.errorMap, onSubmit: message },
+          }));
+        }
+        if (fieldErrors.length === 0) {
+          toast.error(errorMessage(error, "Upload failed. Try again."));
+        }
       }
     },
   });
@@ -172,13 +224,14 @@ export function UploadForm({
   );
   const selectKind = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
-      const next = KINDS.find((k) => k === event.currentTarget.dataset.kind);
+      const next = kinds.find((k) => k === event.currentTarget.dataset.kind);
       if (next) {
         form.setFieldValue("kind", next);
       }
     },
-    [form]
+    [form, kinds]
   );
+  const fields = fieldsFor(kind);
 
   return (
     <form className="flex flex-col gap-5" noValidate onSubmit={handleSubmit}>
@@ -187,7 +240,7 @@ export function UploadForm({
           Type
         </legend>
         <div className="flex flex-wrap gap-[6px]">
-          {KINDS.map((k) => (
+          {kinds.map((k) => (
             <FilterChip
               className="px-[14px]"
               data-kind={k}
@@ -253,6 +306,35 @@ export function UploadForm({
                 </TemplateRow>
               )}
             </form.Field>
+            {fields.has("schoolYear") ? (
+              <form.Field name="schoolYear">
+                {(field) => (
+                  <TemplateRow
+                    error={errorText(field)}
+                    field="schoolYear"
+                    label="School year"
+                  >
+                    <TextValue field={field} placeholder="2026/2027" />
+                  </TemplateRow>
+                )}
+              </form.Field>
+            ) : null}
+            {fields.has("subjects") ? (
+              <form.Field name="subjects">
+                {(field) => (
+                  <TemplateRow
+                    error={errorText(field)}
+                    field="subjects"
+                    label="Subjects"
+                  >
+                    <TextValue
+                      field={field}
+                      placeholder="Maths A1, English B+"
+                    />
+                  </TemplateRow>
+                )}
+              </form.Field>
+            ) : null}
             <form.Field name="average">
               {(field) => (
                 <TemplateRow
@@ -268,36 +350,38 @@ export function UploadForm({
                 </TemplateRow>
               )}
             </form.Field>
-            <form.Field name="position">
-              {(field) => (
-                <TemplateRow
-                  error={errorText(field)}
-                  field="position"
-                  label="Position in class"
-                >
-                  <span className="flex min-w-0 items-center justify-end gap-[6px] font-medium text-[15px] text-ink leading-[18px]">
-                    <TextValue
-                      className="w-10 flex-none"
-                      field={field}
-                      inputMode="numeric"
-                      placeholder="6"
-                    />
-                    <span aria-hidden="true">of</span>
-                    <form.Field name="classSize">
-                      {(sizeField) => (
-                        <TextValue
-                          className="w-10 flex-none"
-                          field={sizeField}
-                          inputMode="numeric"
-                          label="Class size"
-                          placeholder="42"
-                        />
-                      )}
-                    </form.Field>
-                  </span>
-                </TemplateRow>
-              )}
-            </form.Field>
+            {fields.has("position") ? (
+              <form.Field name="position">
+                {(field) => (
+                  <TemplateRow
+                    error={errorText(field)}
+                    field="position"
+                    label="Position in class"
+                  >
+                    <span className="flex min-w-0 items-center justify-end gap-[6px] font-medium text-[15px] text-ink leading-[18px]">
+                      <TextValue
+                        className="w-10 flex-none"
+                        field={field}
+                        inputMode="numeric"
+                        placeholder="6"
+                      />
+                      <span aria-hidden="true">of</span>
+                      <form.Field name="classSize">
+                        {(sizeField) => (
+                          <TextValue
+                            className="w-10 flex-none"
+                            field={sizeField}
+                            inputMode="numeric"
+                            label="Class size"
+                            placeholder="42"
+                          />
+                        )}
+                      </form.Field>
+                    </span>
+                  </TemplateRow>
+                )}
+              </form.Field>
+            ) : null}
           </>
         ) : null}
         {kind === "report_card" ? null : (

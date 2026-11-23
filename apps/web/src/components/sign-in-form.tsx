@@ -1,5 +1,6 @@
 import { Button } from "@hoops-genesis/ui/components/button";
 import { useForm } from "@tanstack/react-form";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useCallback, useState } from "react";
 import { toast } from "sonner";
@@ -16,6 +17,7 @@ import {
 import { BrandMark } from "@/components/brand-mark";
 import { FormTextField } from "@/components/form-text-field";
 import { useAcceptInvitation } from "@/features/invitations/queries";
+import { authErrorMessage, errorMessage } from "@/lib/api-client";
 import { authClient } from "@/lib/auth-client";
 
 const MIN_PASSWORD = 8;
@@ -40,16 +42,22 @@ const selectSubmitState = (state: {
 export default function SignInForm({
   invitationId,
   joinCode,
+  redirect,
 }: {
   invitationId?: string;
   /** From /join when signed out: go back there after sign-in ("" = /join). */
   joinCode?: string;
+  /** A same-site path to return to (the session ended mid-visit). */
+  redirect?: string;
 }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const acceptInvitation = useAcceptInvitation();
   const [showPassword, setShowPassword] = useState(false);
 
   const finishSignIn = useCallback(async () => {
+    // Anything cached belonged to whoever was signed in before.
+    queryClient.removeQueries();
     if (joinCode !== undefined) {
       await (joinCode
         ? navigate({ to: "/join/$code", params: { code: joinCode } })
@@ -57,7 +65,10 @@ export default function SignInForm({
       return;
     }
     if (!invitationId) {
-      await navigate({ to: "/app" });
+      // Back to the page the person was on when their session ended, if any.
+      await (redirect
+        ? navigate({ href: redirect })
+        : navigate({ to: "/app" }));
       return;
     }
     try {
@@ -69,22 +80,32 @@ export default function SignInForm({
         replace: true,
       });
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Couldn't accept the invite."
-      );
+      toast.error(errorMessage(error, "Couldn't accept the invite."));
       await navigate({ to: "/app" });
     }
-  }, [acceptInvitation, invitationId, joinCode, navigate]);
+  }, [
+    acceptInvitation,
+    invitationId,
+    joinCode,
+    navigate,
+    queryClient,
+    redirect,
+  ]);
 
   const form = useForm({
     defaultValues: { email: "", password: "" },
     onSubmit: async ({ value }) => {
-      await authClient.signIn.email(value, {
-        onSuccess: finishSignIn,
-        onError: (error) => {
-          toast.error(error.error.message || error.error.statusText);
-        },
-      });
+      try {
+        await authClient.signIn.email(value, {
+          onSuccess: finishSignIn,
+          onError: (error) => {
+            toast.error(authErrorMessage(error.error));
+          },
+        });
+      } catch (error) {
+        // fetch() itself failed (offline): Better Auth rejects instead of onError.
+        toast.error(errorMessage(error, "Couldn't sign in. Try again."));
+      }
     },
     validators: { onSubmit: schema },
   });

@@ -1,6 +1,7 @@
 import { Button, buttonVariants } from "@hoops-genesis/ui/components/button";
 import { Skeleton } from "@hoops-genesis/ui/components/skeleton";
 import { cn } from "@hoops-genesis/ui/lib/utils";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type MouseEvent, useCallback } from "react";
 import { toast } from "sonner";
@@ -8,24 +9,26 @@ import { toast } from "sonner";
 import { ChevronIcon, RecordIcon } from "@/components/coach/coach-icons";
 import {
   type RecordToReview,
+  recordsToReviewQueryOptions,
   useVerifyRecord,
 } from "@/features/coach-today/queries";
-import type { Id } from "@/features/types";
+import type { Id, Team } from "@/features/types";
+import { errorMessage } from "@/lib/api-client";
 
 const PANEL_ROWS = 3;
 
 /** Desktop: "Records waiting for you" (4QT-0). Athletic results verify in one tap. */
 export function RecordsCard({
-  records,
-  loading,
   academyId,
-  viewerId,
+  teams,
 }: {
-  records: RecordToReview[];
-  loading: boolean;
   academyId: Id;
-  viewerId: Id;
+  teams: Pick<Team, "id" | "name">[];
 }) {
+  // Fails into the QueryBoundary around this card; the sessions stay usable.
+  const recordsQuery = useQuery(recordsToReviewQueryOptions(academyId, teams));
+  const loading = recordsQuery.data === undefined;
+  const records: RecordToReview[] = recordsQuery.data ?? [];
   const verify = useVerifyRecord(academyId);
   const { mutate } = verify;
   const handleVerify = useCallback(
@@ -35,15 +38,16 @@ export function RecordsCard({
         return;
       }
       mutate(
-        { recordId, verifiedBy: viewerId },
+        { recordId },
         {
           onSuccess: () =>
             toast.success(`Verified ${studentName ?? ""}`.trim()),
-          onError: (error) => toast.error(error.message),
+          onError: (error) =>
+            toast.error(errorMessage(error, "Couldn't verify it. Try again.")),
         }
       );
     },
-    [mutate, viewerId]
+    [mutate]
   );
   const shown = records.slice(0, PANEL_ROWS);
   return (

@@ -4,7 +4,10 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { WarningIcon } from "@/components/student/icons";
 import { useAcademyClock } from "@/features/student-calendar/queries";
-import { recordQueryOptions } from "@/features/student-records/queries";
+import {
+  recordQueryOptions,
+  recordTemplatesQueryOptions,
+} from "@/features/student-records/queries";
 import {
   academicData,
   academicTitle,
@@ -38,6 +41,9 @@ function NewRecordPage() {
   const rejected =
     replaced.data?.status === "rejected" ? replaced.data : undefined;
   const rejectedData = rejected ? academicData(rejected) : null;
+  const templates = useQuery(
+    recordTemplatesQueryOptions(academyId, "academic")
+  );
   const waiting = Boolean(replaces) && replaced.status === "pending";
 
   return (
@@ -76,7 +82,7 @@ function NewRecordPage() {
         </div>
       ) : null}
 
-      {waiting ? (
+      {waiting || !templates.data ? (
         <Skeleton className="h-[420px] rounded-md" />
       ) : (
         <UploadForm
@@ -91,6 +97,7 @@ function NewRecordPage() {
           }
           key={rejected?.id ?? "new"}
           studentId={viewer.user.id}
+          templates={templates.data}
           today={today}
         />
       )}

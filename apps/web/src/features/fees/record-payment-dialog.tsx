@@ -16,6 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, type MouseEvent, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import z from "zod";
+import { ErrorState, failedQueries } from "@/components/error-state";
 import {
   addMonths,
   isPeriodKey,
@@ -31,11 +32,11 @@ import {
 } from "@/features/fees/periods";
 import {
   currentTime,
-  DuplicatePaymentError,
   defaultFeeQueryOptions,
   type FeeStudent,
   feeStudentsQueryOptions,
   feesQueryOptions,
+  isDuplicatePayment,
   type PaymentRow,
   useRecordPayment,
 } from "@/features/fees/queries";
@@ -50,6 +51,7 @@ import {
   StudentSelectField,
 } from "@/features/fees/record-payment-fields";
 import type { Id, PaymentMethod } from "@/features/types";
+import { errorMessage } from "@/lib/api-client";
 import { firstName, formatDayMonth, formatMoney } from "@/lib/format";
 import { useIsPhone } from "@/lib/use-is-phone";
 
@@ -453,7 +455,7 @@ function RecordPaymentForm({
     () => [-2, -1, 0, 1].map((offset) => addMonths(thisPeriod, offset)),
     [thisPeriod]
   );
-  const recordPayment = useRecordPayment(academyId, viewerId);
+  const recordPayment = useRecordPayment(academyId);
 
   const handleSave = useCallback(
     async (values: RecordValues) => {
@@ -480,10 +482,13 @@ function RecordPaymentForm({
         });
         onDone();
       } catch (error) {
+        if (isDuplicatePayment(error)) {
+          // The fee lists refresh, so the "already paid" notice appears above.
+          toast.error("This student already paid for that period.");
+          return;
+        }
         toast.error(
-          error instanceof DuplicatePaymentError
-            ? "This student already paid for that period."
-            : "The payment couldn't be saved. Try again."
+          errorMessage(error, "The payment couldn't be saved. Try again.")
         );
       }
     },
@@ -494,7 +499,8 @@ function RecordPaymentForm({
     {
       studentId: initialStudentId ?? "",
       period: thisPeriod,
-      amount: String(Math.round(Number(defaultAmount))),
+      // Empty when the academy has no payments yet to take a usual fee from.
+      amount: defaultAmount ? String(Math.round(Number(defaultAmount))) : "",
       paidOn: today,
       method: "cash",
       reference: "",
@@ -540,7 +546,8 @@ function RecordPaymentForm({
   );
 }
 
-function LoadingBody() {
+/** Skeletons while the form's data loads, or the error with "Try again". */
+function LoadingBody({ failed }: { failed: ReturnType<typeof failedQueries> }) {
   return (
     <>
       <DialogHeader>
@@ -550,10 +557,20 @@ function LoadingBody() {
         </DialogDescription>
       </DialogHeader>
       <DialogBody>
-        <Skeleton className="h-[52px] rounded-[14px]" />
-        <Skeleton className="h-[46px] rounded-[14px]" />
-        <Skeleton className="h-[46px] rounded-[14px]" />
-        <Skeleton className="h-[46px] rounded-full" />
+        {failed ? (
+          <ErrorState
+            error={failed.error}
+            onRetry={failed.retry}
+            what="the payment form"
+          />
+        ) : (
+          <>
+            <Skeleton className="h-[52px] rounded-[14px]" />
+            <Skeleton className="h-[46px] rounded-[14px]" />
+            <Skeleton className="h-[46px] rounded-[14px]" />
+            <Skeleton className="h-[46px] rounded-full" />
+          </>
+        )}
       </DialogBody>
     </>
   );
@@ -576,20 +593,25 @@ export function RecordPaymentDialog({
   onOpenChange: (open: boolean) => void;
   onViewPayment: (feeId: Id, period: PeriodKey) => void;
 }) {
+  // A failure shows inside the dialog, not over the Fees page behind it.
   const students = useQuery({
     ...feeStudentsQueryOptions(academyId),
     enabled: open,
+    throwOnError: false,
   });
   const payments = useQuery({
     ...feesQueryOptions(academyId, null),
     enabled: open,
+    throwOnError: false,
   });
   const defaultFee = useQuery({
     ...defaultFeeQueryOptions(academyId),
     enabled: open,
+    throwOnError: false,
   });
   const handleDone = useCallback(() => onOpenChange(false), [onOpenChange]);
   const ready = students.data && payments.data && defaultFee.data;
+  const failed = failedQueries(students, payments, defaultFee);
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -609,7 +631,7 @@ export function RecordPaymentDialog({
             viewerId={viewerId}
           />
         ) : (
-          <LoadingBody />
+          <LoadingBody failed={failed} />
         )}
       </DialogContent>
     </Dialog>

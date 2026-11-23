@@ -28,24 +28,26 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { type ChangeEvent, useCallback } from "react";
 import { toast } from "sonner";
 
-import { referenceNow } from "@/features/owner-academies/queries";
 import { BanDialog } from "@/features/owner-users/ban-dialog";
 import {
   type PlatformUser,
   type PlatformUserMembership,
   platformUsersQueryOptions,
+  useForgetOwnerQueries,
   useImpersonateUser,
   useRevokeUserSessions,
   userSessionsQueryOptions,
 } from "@/features/owner-users/queries";
 import type { AcademyRole, Country } from "@/features/types";
 import { roleLabel } from "@/features/viewer/selectors";
+import { errorMessage } from "@/lib/api-client";
 import {
   firstName,
   formatRelativeDay,
   formatTime,
   initials,
 } from "@/lib/format";
+import { appNow } from "@/lib/preview";
 
 export interface UsersSearch {
   dialog?: "ban";
@@ -293,7 +295,7 @@ function lastSeenText(
   if (!updatedAt) {
     return null;
   }
-  const day = formatRelativeDay(updatedAt, timeZone, referenceNow());
+  const day = formatRelativeDay(updatedAt, timeZone, appNow());
   const lowered =
     day === "Today" || day === "Yesterday" ? day.toLowerCase() : day;
   return `last seen ${lowered} ${formatTime(updatedAt, timeZone)}`;
@@ -358,9 +360,14 @@ function UserPanel({
   onBan: () => void;
 }) {
   const navigate = useNavigate();
-  const { data: sessions } = useQuery(userSessionsQueryOptions(user.id));
+  // Only "last seen" and the device count: left out if it fails.
+  const { data: sessions } = useQuery({
+    ...userSessionsQueryOptions(user.id),
+    throwOnError: false,
+  });
   const revoke = useRevokeUserSessions();
   const impersonate = useImpersonateUser();
+  const forgetOwnerQueries = useForgetOwnerQueries();
   const timeZone = user.memberships[0]?.timezone ?? FALLBACK_TIMEZONE;
   const first = firstName(user.name);
   const lastSeen = lastSeenText(sessions?.[0]?.updatedAt, timeZone);
@@ -370,11 +377,20 @@ function UserPanel({
     impersonate.mutate(
       { userId: user.id },
       {
-        onSuccess: ({ home }) => navigate({ href: `${home}?impersonating=1` }),
-        onError: (error) => toast.error(error.message),
+        // Preview shows the banner from `?impersonating=1`; for real the session says so.
+        onSuccess: async ({ home }) => {
+          await navigate({
+            href: home === "/app" ? home : `${home}?impersonating=1`,
+          });
+          forgetOwnerQueries();
+        },
+        onError: (error) =>
+          toast.error(
+            errorMessage(error, "Couldn't start viewing as them. Try again.")
+          ),
       }
     );
-  }, [impersonate, navigate, user.id]);
+  }, [impersonate, navigate, user.id, forgetOwnerQueries]);
 
   const signOutEverywhere = useCallback(() => {
     revoke.mutate(
@@ -384,7 +400,10 @@ function UserPanel({
           toast.success(
             `${first} is signed out on ${plural(revoked, "device", "devices")}`
           ),
-        onError: (error) => toast.error(error.message),
+        onError: (error) =>
+          toast.error(
+            errorMessage(error, "Couldn't sign them out. Try again.")
+          ),
       }
     );
   }, [revoke, user.id, first]);
@@ -468,7 +487,11 @@ export function UsersScreen({ search }: { search: UsersSearch }) {
   const navigate = useNavigate({ from: "/owner/users" });
   const q = search.q ?? "";
   const { data } = useQuery(platformUsersQueryOptions(q));
-  const { data: everyone } = useQuery(platformUsersQueryOptions(""));
+  // Only the "N people across all academies" line: left out if it fails.
+  const { data: everyone } = useQuery({
+    ...platformUsersQueryOptions(""),
+    throwOnError: false,
+  });
   const results = data?.users;
   const selected =
     results?.find((u) => u.id === search.user) ??

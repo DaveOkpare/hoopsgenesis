@@ -3,6 +3,7 @@ import z from "zod";
 
 import { AuthLayout } from "@/components/auth-layout";
 import SignInForm from "@/components/sign-in-form";
+import { isSafeReturnPath } from "@/lib/errors";
 
 const JOIN_CODE_PARAM = /^[A-Za-z0-9-]{0,14}$/;
 
@@ -13,6 +14,8 @@ const JOIN_CODE_PARAM = /^[A-Za-z0-9-]{0,14}$/;
 const searchSchema = z.object({
   invitationId: z.string().min(1).optional().catch(undefined),
   joinCode: z.string().regex(JOIN_CODE_PARAM).optional().catch(undefined),
+  /** Set when a session ended mid-visit: the page to go back to after sign-in. */
+  redirect: z.string().refine(isSafeReturnPath).optional().catch(undefined),
 });
 
 export const Route = createFileRoute("/login")({
@@ -26,10 +29,14 @@ export const Route = createFileRoute("/login")({
  * the role's home. There is no public sign-up: accounts come from invites.
  */
 function LoginPage() {
-  const { invitationId, joinCode } = Route.useSearch();
+  const { invitationId, joinCode, redirect } = Route.useSearch();
   return (
     <AuthLayout>
-      <SignInForm invitationId={invitationId} joinCode={joinCode} />
+      <SignInForm
+        invitationId={invitationId}
+        joinCode={joinCode}
+        redirect={redirect}
+      />
     </AuthLayout>
   );
 }

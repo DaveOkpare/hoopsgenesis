@@ -2,7 +2,8 @@
 import { Button } from "@hoops-genesis/ui/components/button";
 import { Checkbox } from "@hoops-genesis/ui/components/checkbox";
 import { cn } from "@hoops-genesis/ui/lib/utils";
-import { useId } from "react";
+import { useCallback, useId } from "react";
+import { toast } from "sonner";
 
 import {
   isSelfUpload,
@@ -11,8 +12,10 @@ import {
   recordProvenance,
   recordTitle,
 } from "@/features/records/describe";
-import type { ReviewItem } from "@/features/records/queries";
+import { type ReviewItem, useOpenRecordFile } from "@/features/records/queries";
+import { isApiError } from "@/lib/api-client";
 import { firstName } from "@/lib/format";
+import { isUiPreview } from "@/lib/preview";
 
 const DOC_LINES = ["45%", "38%", "50%", "42%", "35%", "48%"];
 
@@ -98,24 +101,60 @@ function DocumentPreview({ label }: { label: string }) {
   );
 }
 
+/** Opens the attached file through a fresh signed link (GET /records/:id). */
+function OpenFileButton({ item }: { item: ReviewItem }) {
+  const openFile = useOpenRecordFile(item.academyId);
+  const handleClick = useCallback(async () => {
+    try {
+      const file = await openFile.mutateAsync(item.id);
+      if (file) {
+        window.open(file.url, "_blank", "noopener");
+      } else {
+        toast.error("This record has no file attached.");
+      }
+    } catch (error) {
+      toast.error(
+        isApiError(error, "storage_not_configured")
+          ? "Files can't be opened yet: file storage isn't set up on this server."
+          : "Couldn't open the file. Try again."
+      );
+    }
+  }, [item.id, openFile]);
+  return (
+    <Button
+      className="self-center"
+      disabled={openFile.isPending}
+      onClick={handleClick}
+      size="sm"
+      variant="outline"
+    >
+      {openFile.isPending ? "Opening…" : "Open file"}
+    </Button>
+  );
+}
+
 function Preview({ item }: { item: ReviewItem }) {
-  const hasDocument = item.recordType === "academic";
+  const hasDocument = item.hasFile;
   return (
     <div
       className={cn(
-        "flex flex-[1.3] basis-0 justify-center rounded-[14px] bg-fog p-6 max-md:flex-none max-md:basis-auto max-md:p-5",
+        "flex flex-[1.3] basis-0 flex-col items-center justify-center gap-3 rounded-[14px] bg-fog p-6 max-md:flex-none max-md:basis-auto max-md:p-5",
         !hasDocument && "self-start"
       )}
     >
       {hasDocument ? (
-        <DocumentPreview
-          label={`${recordFileName(item) ?? recordTitle(item)}, preview`}
-        />
+        <>
+          <DocumentPreview
+            label={`${recordFileName(item) ?? recordTitle(item)}, preview`}
+          />
+          {/* Preview has no stored files; keep the drawn document only. */}
+          {isUiPreview ? null : <OpenFileButton item={item} />}
+        </>
       ) : (
         <div className="flex min-h-40 flex-col items-center justify-center gap-2 text-center text-muted text-sm leading-[18px]">
           <PhotoIcon className="size-6 text-ink" />
-          No file attached. {firstName(item.recordedByName)} entered the result
-          by hand.
+          No file attached. {firstName(item.recordedByName)} entered the{" "}
+          {item.recordType === "academic" ? "record" : "result"} by hand.
         </div>
       )}
     </div>
@@ -222,7 +261,7 @@ export function RecordBody({ item }: { item: ReviewItem }) {
   const enteredBy = isSelfUpload(item)
     ? firstName(item.student.name)
     : firstName(item.recordedByName);
-  const hasFile = item.recordType === "academic";
+  const { hasFile } = item;
   return (
     <div className="flex flex-1 gap-5 p-6 max-md:flex-col max-md:p-0">
       <Preview item={item} />

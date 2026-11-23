@@ -11,13 +11,15 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  canExtendInvitationCodes,
   createInvitationCode,
   extendInvitationCode,
   getJoinPreviewExtras,
   getJoinSession,
   type InvitationCode,
   type InvitationCodeErrorCode,
-  isInvitationCodeError,
+  type InvitationCodePreview,
+  invitationCodeErrorCode,
   type JoinPreviewAs,
   listInvitationCodes,
   MAX_CODE_LIFETIME_MS,
@@ -29,6 +31,7 @@ import {
 } from "@/features/join-codes/api";
 import type { Id, Paginated } from "@/features/types";
 import { viewerKeys } from "@/features/viewer/queries";
+import { isUiPreview } from "@/lib/preview";
 
 export type {
   InvitationCode,
@@ -51,10 +54,13 @@ export const CODE_LIMITS = {
 export function joinCodeErrorCode(
   error: unknown
 ): InvitationCodeErrorCode | null {
-  return isInvitationCodeError(error) ? error.code : null;
+  return invitationCodeErrorCode(error);
 }
 
-/** "Now" for statuses and "Ends in 4 days": the fixture clock until the API is real. */
+/** "Extend" has no endpoint; the control shows only in preview. */
+export const canExtendJoinCodes = canExtendInvitationCodes;
+
+/** "Now" for statuses and "Ends in 4 days" (the designs' moment in preview). */
 export function useJoinCodesNow(): Date {
   return referenceNow();
 }
@@ -87,7 +93,10 @@ export function joinSessionQueryOptions(input: {
     queryKey: joinCodeKeys.session(
       input.preview ? (input.previewAs ?? "claire") : "session"
     ),
-    queryFn: () => getJoinSession(input),
+    queryFn: () =>
+      getJoinSession({
+        previewAs: input.preview ? input.previewAs : undefined,
+      }),
     staleTime: Number.POSITIVE_INFINITY,
   });
 }
@@ -161,21 +170,30 @@ export function useExtendJoinCode() {
   return useCodeMutation(extendInvitationCode);
 }
 
-/** Join, then refresh the academy's code list (uses) and the viewer's academies. */
+/**
+ * Join, then refresh the academy's code list (uses) and the viewer's academies. The
+ * cached preview is marked "already a member" rather than refetched: a single-use code
+ * is used up now, and "You're in" still needs the academy and team it named.
+ */
 export function useRedeemJoinCode() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: redeemInvitationCode,
     onSuccess: async (result) => {
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: joinCodeKeys.list(result.academy.id),
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["invitation-codes", "preview"],
-        }),
-        queryClient.invalidateQueries({ queryKey: viewerKeys.all }),
-      ]);
+      queryClient.setQueriesData<InvitationCodePreview>(
+        { queryKey: ["invitation-codes", "preview"] },
+        (preview) =>
+          preview?.academy.id === result.academy.id
+            ? { ...preview, alreadyMember: true }
+            : preview
+      );
+      // Preview seeds the viewer from the URL; only a real session changes here.
+      if (!isUiPreview) {
+        queryClient.removeQueries({ queryKey: viewerKeys.all });
+      }
+      await queryClient.invalidateQueries({
+        queryKey: joinCodeKeys.list(result.academy.id),
+      });
     },
   });
 }

@@ -22,6 +22,8 @@ import {
   joinSessionQueryOptions,
   useRedeemJoinCode,
 } from "@/features/join-codes/queries";
+import { viewerKeys } from "@/features/viewer/queries";
+import { isTransientError } from "@/lib/errors";
 import { isUiPreview } from "@/lib/preview";
 
 const WHITESPACE = /\s+/;
@@ -72,14 +74,22 @@ function CodeFlow({
   search: JoinPageSearch;
   session: JoinSession;
 }) {
-  const preview = useQuery(joinPreviewQueryOptions(code, session.id));
+  // A code that is wrong, used up or expired comes back as a 4xx and is shown in the
+  // form below; only a dropped connection or a server failure goes to the error screen.
+  const preview = useQuery({
+    ...joinPreviewQueryOptions(code, session.id),
+    throwOnError: (error, query) =>
+      query.state.data === undefined && isTransientError(error),
+  });
   const academyId = preview.data?.academy.id;
+  // City and coach names for the cards: left out if they fail.
   const extras = useQuery({
     ...joinPreviewExtrasQueryOptions(
       academyId ?? "",
       preview.data?.team?.id ?? null
     ),
     enabled: Boolean(academyId),
+    throwOnError: false,
   }).data;
   const redeem = useRedeemJoinCode();
   const [redeemProblem, setRedeemProblem] = useState<JoinProblem | null>(null);
@@ -189,6 +199,10 @@ export function JoinPage({
     [nav]
   );
   const handleSignedUp = useCallback(async () => {
+    // A new session: drop anything cached for whoever was signed in before.
+    if (!isUiPreview) {
+      queryClient.removeQueries({ queryKey: viewerKeys.all });
+    }
     await queryClient.invalidateQueries({ queryKey: joinCodeKeys.all });
     nav.setSearch({ account: undefined, as: undefined });
   }, [nav, queryClient]);

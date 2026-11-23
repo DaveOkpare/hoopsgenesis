@@ -17,14 +17,14 @@ import {
   type ChangeEvent,
   type FormEvent,
   type MouseEvent,
+  type ReactNode,
   useCallback,
-  useEffect,
   useId,
   useState,
 } from "react";
 import { toast } from "sonner";
 import z from "zod";
-
+import { ErrorState } from "@/components/error-state";
 import { PickerValue } from "@/features/events/components/picker-row";
 import {
   bestNote,
@@ -35,32 +35,29 @@ import {
   type CoachStudent,
   coachStudentsQueryOptions,
   recentResultsQueryOptions,
+  resultErrorMessage,
+  resultTemplatesQueryOptions,
   sessionOptionsQueryOptions,
   useCreateAthleticRecord,
 } from "@/features/results/queries";
-import {
-  type AthleticData,
-  type DrillId,
-  RESULT_TEMPLATES,
-  type ResultTemplate,
-  templateFor,
-} from "@/features/results/templates";
+import type { DrillId, ResultTemplate } from "@/features/results/templates";
 import { formatWeekdayDayMonth } from "@/features/sessions/time";
 import type { DateOnly, Id, Team } from "@/features/types";
 import { firstName, initials } from "@/lib/format";
 
 const NO_SESSION = "none";
-const MAX_SECONDS = 600;
+const DEFAULT_ATTEMPTS = 10;
 
 function scoreSchema(template: ResultTemplate) {
-  if (template.metric === "seconds") {
-    return z
-      .number({ message: "Enter the time in seconds" })
-      .int("Whole seconds only")
-      .min(1, "Enter the time in seconds")
-      .max(MAX_SECONDS, "That is more than 10 minutes");
+  if (template.metric === "measure") {
+    const unit = template.unit ? ` ${template.unit}` : "";
+    const base = z
+      .number({ message: `Enter the ${template.scoreLabel.toLowerCase()}` })
+      .min(template.min, `At least ${template.min}${unit}`)
+      .max(template.max, `At most ${template.max}${unit}`);
+    return template.integer ? base.int("Whole numbers only") : base;
   }
-  const attempts = template.attempts ?? 10;
+  const attempts = template.attempts ?? DEFAULT_ATTEMPTS;
   return z
     .number({ message: `Enter how many went in, 0 to ${attempts}` })
     .int("Whole numbers only")
@@ -88,7 +85,7 @@ function ScoreBox({
   );
   const error = (field.state.meta.errors[0] as { message?: string } | undefined)
     ?.message;
-  const label = template.metric === "seconds" ? "Time" : "Made";
+  const label = template.scoreLabel;
   const digits = Math.max(1, String(value ?? "").length);
   return (
     <div
@@ -109,12 +106,13 @@ function ScoreBox({
           aria-invalid={error ? true : undefined}
           className="bg-transparent text-center font-display text-[72px] text-ink leading-none outline-none [appearance:textfield] placeholder:text-stone [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           id={id}
-          inputMode="numeric"
-          max={template.metric === "seconds" ? MAX_SECONDS : template.attempts}
-          min={0}
+          inputMode={template.integer ? "numeric" : "decimal"}
+          max={template.metric === "measure" ? template.max : template.attempts}
+          min={template.metric === "measure" ? template.min : 0}
           onBlur={field.handleBlur}
           onChange={handleChange}
           placeholder="0"
+          step={template.integer ? 1 : "any"}
           style={{ width: `${digits * 0.62}em` }}
           type="number"
           value={value ?? ""}
@@ -123,8 +121,8 @@ function ScoreBox({
           className="font-semibold text-[20px] text-muted leading-6"
           id={`${id}-hint`}
         >
-          {template.metric === "seconds"
-            ? "seconds"
+          {template.metric === "measure"
+            ? (template.unit ?? "")
             : `of ${template.attempts}`}
         </span>
       </span>
@@ -182,7 +180,6 @@ const selectSubmit = (state: { isSubmitting: boolean }) => state.isSubmitting;
 export function LogResultForm({
   academyId,
   teams,
-  viewerId,
   today,
   studentId,
   drill,
@@ -192,62 +189,99 @@ export function LogResultForm({
 }: {
   academyId: Id;
   teams: Pick<Team, "id" | "name">[];
-  viewerId: Id;
   today: DateOnly;
   studentId?: Id;
-  drill: DrillId;
+  drill?: DrillId;
   onStudentChange: (studentId: Id) => void;
   onDrillChange: (drill: DrillId) => void;
   onSaved: () => void;
 }) {
-  const teamIds = teams.map((t) => t.id);
-  const students = useQuery(coachStudentsQueryOptions(academyId, teamIds));
+  const templates = useQuery(resultTemplatesQueryOptions(academyId));
+  const template =
+    templates.data?.find((t) => t.id === drill) ?? templates.data?.[0];
+  if (!template) {
+    return templates.data ? (
+      <p className="text-[15px] text-muted leading-5">
+        No athletic templates are set up for this academy yet.
+      </p>
+    ) : (
+      <Skeleton className="h-[420px] w-full max-w-[560px] rounded-md" />
+    );
+  }
+  return (
+    <LogResultFields
+      academyId={academyId}
+      onDrillChange={onDrillChange}
+      onSaved={onSaved}
+      onStudentChange={onStudentChange}
+      studentId={studentId}
+      teams={teams}
+      template={template}
+      templates={templates.data ?? []}
+      today={today}
+    />
+  );
+}
+
+function LogResultFields({
+  academyId,
+  teams,
+  today,
+  studentId,
+  template,
+  templates,
+  onStudentChange,
+  onDrillChange,
+  onSaved,
+}: {
+  academyId: Id;
+  teams: Pick<Team, "id" | "name">[];
+  today: DateOnly;
+  studentId?: Id;
+  template: ResultTemplate;
+  templates: ResultTemplate[];
+  onStudentChange: (studentId: Id) => void;
+  onDrillChange: (drill: DrillId) => void;
+  onSaved: () => void;
+}) {
+  const students = useQuery(coachStudentsQueryOptions(academyId, teams));
   const student = students.data?.find((s) => s.id === studentId);
-  const template = templateFor(drill) ?? RESULT_TEMPLATES[0];
   const [pickerOpen, setPickerOpen] = useState(false);
   const create = useCreateAthleticRecord(academyId);
   const { mutateAsync } = create;
 
+  // The chart and the session picker are helpers around the form: when they fail they
+  // say so in place, and what the coach typed stays.
   const recent = useQuery({
-    ...recentResultsQueryOptions(academyId, studentId ?? "", drill),
+    ...recentResultsQueryOptions(academyId, studentId ?? "", template),
     enabled: Boolean(studentId),
+    throwOnError: false,
   });
 
   const form = useForm({
     defaultValues: {
       score: null as number | null,
       date: today,
-      session: NO_SESSION,
+      /** null until the coach picks one: then the day's first session is used. */
+      session: null as string | null,
     },
     onSubmit: async ({ value }) => {
-      if (!(student && template) || value.score === null) {
+      if (!student || value.score === null) {
         return;
       }
-      const data: AthleticData =
-        template.metric === "seconds"
-          ? { drill: "dribbling", seconds: value.score }
-          : {
-              drill: template.id as "free_throws" | "three_point",
-              made: value.score,
-              attempts: template.attempts ?? 10,
-            };
+      const session = effectiveSession(value.session);
       try {
         await mutateAsync({
           studentId: student.id,
           recordedOn: value.date,
-          recordedBy: viewerId,
-          data: {
-            ...data,
-            sport: "basketball",
-            eventId: value.session === NO_SESSION ? undefined : value.session,
-          },
+          template,
+          score: value.score,
+          eventId: session === NO_SESSION ? undefined : session,
         });
         toast.success(`Result saved for ${student.name}`);
         onSaved();
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Could not save the result"
-        );
+        toast.error(resultErrorMessage(error));
       }
     },
   });
@@ -255,21 +289,25 @@ export function LogResultForm({
   const score = useStore(form.store, (s) => s.values.score);
   const date = useStore(form.store, (s) => s.values.date);
   const sessions = useQuery({
-    ...sessionOptionsQueryOptions(academyId, student?.teamId ?? "", date),
+    ...sessionOptionsQueryOptions(
+      academyId,
+      { id: student?.teamId ?? "", name: student?.teamName ?? "" },
+      date
+    ),
     enabled: Boolean(student),
+    throwOnError: false,
   });
+  const retrySessions = useCallback(() => sessions.refetch(), [sessions]);
   const sessionItems = [
     ...(sessions.data ?? []).map((s) => ({ value: s.eventId, label: s.label })),
     { value: NO_SESSION, label: "No session" },
   ];
-  // Default to the first session that day once they load.
-  const firstSession = sessions.data?.[0]?.eventId;
-  const sessionsLoaded = Boolean(sessions.data);
-  useEffect(() => {
-    if (sessionsLoaded) {
-      form.setFieldValue("session", firstSession ?? NO_SESSION);
-    }
-  }, [firstSession, form, sessionsLoaded]);
+  // Derived default: the coach's pick while it is still offered, else that day's first
+  // session, else none.
+  const effectiveSession = (picked: string | null): string =>
+    picked && sessionItems.some((item) => item.value === picked)
+      ? picked
+      : (sessions.data?.[0]?.eventId ?? NO_SESSION);
 
   const note = bestNote(recent.data ?? [], template, score);
 
@@ -307,15 +345,25 @@ export function LogResultForm({
     [form, student]
   );
 
-  const chart =
-    student && recent.data ? (
+  let chart: ReactNode = null;
+  if (student && recent.data) {
+    chart = (
       <RecentResults
         current={score}
         firstName={firstName(student.name)}
         results={recent.data}
         template={template}
       />
-    ) : null;
+    );
+  } else if (student && recent.isError) {
+    chart = (
+      <ErrorState
+        error={recent.error}
+        onRetry={recent.refetch}
+        what="recent results"
+      />
+    );
+  }
 
   return (
     <div className="flex items-start gap-8 max-md:flex-col max-md:items-stretch max-md:gap-5">
@@ -335,7 +383,7 @@ export function LogResultForm({
             Template
           </legend>
           <div className="flex flex-wrap gap-[6px]">
-            {RESULT_TEMPLATES.map((t) => (
+            {templates.map((t) => (
               <FilterChip
                 className="px-[14px]"
                 data-drill={t.id}
@@ -363,9 +411,27 @@ export function LogResultForm({
             {(field) => <DateField field={field} today={today} />}
           </form.Field>
           <form.Field name="session">
-            {(field) => <SessionField field={field} items={sessionItems} />}
+            {(field) => (
+              <SessionField
+                field={field}
+                items={sessionItems}
+                value={effectiveSession(field.state.value as string | null)}
+              />
+            )}
           </form.Field>
         </div>
+        {sessions.isError && !sessions.data ? (
+          <FieldMessage className="text-sm leading-[18px]" tone="error">
+            Couldn’t load that day’s sessions, so “No session” is used.{" "}
+            <button
+              className="cursor-pointer font-semibold text-ink underline underline-offset-2"
+              onClick={retrySessions}
+              type="button"
+            >
+              Try again
+            </button>
+          </FieldMessage>
+        ) : null}
 
         <div className="md:hidden">{chart}</div>
 
@@ -426,14 +492,16 @@ function DateField({ field, today }: { field: AnyFieldApi; today: DateOnly }) {
 function SessionField({
   field,
   items,
+  value,
 }: {
   field: AnyFieldApi;
   items: { value: string; label: string }[];
+  value: string;
 }) {
   const handleValue = useCallback(
-    (value: string | null) => {
-      if (value) {
-        field.handleChange(value);
+    (next: string | null) => {
+      if (next) {
+        field.handleChange(next);
       }
     },
     [field]
@@ -446,11 +514,7 @@ function SessionField({
       >
         Session
       </span>
-      <Select
-        items={items}
-        onValueChange={handleValue}
-        value={field.state.value}
-      >
+      <Select items={items} onValueChange={handleValue} value={value}>
         <SelectTrigger
           aria-labelledby="result-session-label"
           className="py-[11px] [&>svg]:hidden"

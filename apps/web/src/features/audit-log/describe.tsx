@@ -11,6 +11,20 @@ export interface AuditKind {
   tone: "alert" | "neutral";
 }
 
+/** Badges for the server's other audited actions. */
+const KIND_LABEL: Record<string, string> = {
+  "fee.create": "Payment",
+  "attendance.verify": "Tick",
+  "attendance.unverify": "Untick",
+  "member.join_by_code": "Roster",
+  "event.delete": "Calendar",
+  "event.session_cancel": "Calendar",
+  "invitation_code.create": "Join code",
+  "invitation_code.revoke": "Join code",
+  "user.impersonate_start": "Support",
+  "user.impersonate_stop": "Support",
+};
+
 export function auditKind(action: string): AuditKind {
   if (action.endsWith(".void")) {
     return { label: "Void", tone: "alert" };
@@ -27,10 +41,16 @@ export function auditKind(action: string): AuditKind {
   if (action.startsWith("team.")) {
     return { label: "Roster", tone: "neutral" };
   }
-  if (action === "academy.qr_regenerate") {
+  if (
+    action === "academy.qr_regenerate" ||
+    action === "academy_qr.regenerate"
+  ) {
     return { label: "QR", tone: "neutral" };
   }
-  return { label: action.split(".")[0] ?? action, tone: "neutral" };
+  return {
+    label: KIND_LABEL[action] ?? action.split(".")[0] ?? action,
+    tone: "neutral",
+  };
 }
 
 function text(value: unknown): string {
@@ -90,7 +110,51 @@ export function describeAudit(entry: AuditLogItem): ReactNode {
         </>
       );
     case "academy.qr_regenerate":
+    case "academy_qr.regenerate":
       return "Regenerated the academy QR code · old prints stopped working";
+    case "fee.create":
+      return (
+        <>
+          Recorded a payment for {name}
+          {withDetail(entry.summary)}
+        </>
+      );
+    case "attendance.verify":
+      return (
+        <>
+          Ticked {name} as seen
+          {withDetail(entry.summary)}
+        </>
+      );
+    case "attendance.unverify":
+      return (
+        <>
+          Unticked {name}
+          {withDetail(entry.summary)}
+        </>
+      );
+    case "team.member_add":
+      return (
+        <>
+          Added {name} to {entry.summary ?? "a team"}
+        </>
+      );
+    case "team.member_remove":
+      return (
+        <>
+          Removed {name} from {entry.summary ?? "a team"}
+        </>
+      );
+    case "member.join_by_code":
+      return <>{entry.subject ? name : "Someone"} joined with a join code</>;
+    case "invitation_code.create":
+      return "Made a join code";
+    case "invitation_code.revoke":
+      return "Revoked a join code";
+    case "event.delete":
+      return "Deleted an event";
+    case "event.session_cancel":
+      return "Cancelled a session";
     default:
       return (
         <>

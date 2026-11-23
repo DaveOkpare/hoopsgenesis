@@ -43,10 +43,16 @@ const schema = z.object({ email: z.email("Enter a valid email address") });
  * email has an account, and so is what we show, so the page never reveals who exists.
  */
 async function requestReset(email: string): Promise<boolean> {
-  const { error } = await authClient.requestPasswordReset({
-    email,
-    redirectTo: RESET_REDIRECT_PATH,
-  });
+  let error: { status: number } | null;
+  try {
+    ({ error } = await authClient.requestPasswordReset({
+      email,
+      redirectTo: RESET_REDIRECT_PATH,
+    }));
+  } catch {
+    // fetch() itself failed (offline): Better Auth rejects instead of returning error.
+    error = { status: 0 };
+  }
   if (!error) {
     return true;
   }

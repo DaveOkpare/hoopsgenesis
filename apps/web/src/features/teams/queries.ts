@@ -7,19 +7,27 @@ import {
 import {
   createTeam,
   listCoachCandidates,
+  listMyTeams,
   listStudentsWithoutTeam,
   listTeams,
+  TEAM_SPORT_STORED,
 } from "@/features/teams/api";
-import type { Id } from "@/features/types";
+import type { DateOnly, Id } from "@/features/types";
 
 export type {
   CoachCandidate,
+  MyTeam,
   TeamCoachInvite,
   TeamListItem,
+  TeamNextSession,
 } from "@/features/teams/api";
+
+/** Whether the Create team form shows the Sport field (no sport column in real mode). */
+export const teamSportStored: boolean = TEAM_SPORT_STORED;
 
 export const teamListKeys = {
   list: (academyId: Id) => ["academies", academyId, "teams", "list"] as const,
+  mine: (academyId: Id) => ["academies", academyId, "teams", "mine"] as const,
   withoutTeam: (academyId: Id) =>
     ["academies", academyId, "teams", "students-without-team"] as const,
   coachCandidates: (academyId: Id) =>
@@ -30,6 +38,14 @@ export function teamListQueryOptions(academyId: Id) {
   return queryOptions({
     queryKey: teamListKeys.list(academyId),
     queryFn: () => listTeams(academyId),
+  });
+}
+
+/** The coach's My teams cards (CO-10). */
+export function myTeamsQueryOptions(academyId: Id, today: DateOnly) {
+  return queryOptions({
+    queryKey: [...teamListKeys.mine(academyId), today] as const,
+    queryFn: () => listMyTeams(academyId, { today }),
   });
 }
 
@@ -52,9 +68,11 @@ export function useCreateTeam() {
   return useMutation({
     mutationFn: createTeam,
     onSuccess: async (team) => {
-      // Lists, rosters and the team page all live under this prefix.
+      // Teams feed rosters, members, the dashboard and setup too: refresh the academy.
       await queryClient.invalidateQueries({
-        queryKey: ["academies", team.academyId, "teams"],
+        predicate: (query) =>
+          query.queryKey[0] === "academies" &&
+          query.queryKey[1] === team.academyId,
       });
     },
   });

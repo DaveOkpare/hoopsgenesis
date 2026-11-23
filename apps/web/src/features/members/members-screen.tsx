@@ -65,6 +65,7 @@ import {
 import { teamListQueryOptions } from "@/features/teams/queries";
 import type { Id, Invitation, Member } from "@/features/types";
 import { useViewer } from "@/features/viewer/queries";
+import { errorMessage } from "@/lib/api-client";
 import { firstName, initials } from "@/lib/format";
 
 export type MembersTab = "all" | "students" | "coaches" | "admins" | "invites";
@@ -519,9 +520,17 @@ export function MembersScreen({
   const now = useReferenceNow();
   const members = useQuery(membersQueryOptions(academyId)).data;
   const invites = useQuery(invitationsQueryOptions(academyId)).data;
-  const counts = useQuery(memberCountsQueryOptions(academyId)).data;
   const teams = useQuery(teamListQueryOptions(academyId)).data;
-  const owner = useQuery(platformOwnerQueryOptions()).data;
+  // Extras the page can do without (the eyebrow count, the owner's row): when they
+  // fail they are left out rather than replacing the page with an error.
+  const counts = useQuery({
+    ...memberCountsQueryOptions(academyId),
+    throwOnError: false,
+  }).data;
+  const owner = useQuery({
+    ...platformOwnerQueryOptions(),
+    throwOnError: false,
+  }).data;
   const resend = useResendInvitation();
   const cancel = useCancelInvitation();
   const [query, setQuery] = useState("");
@@ -558,33 +567,43 @@ export function MembersScreen({
   const handleResend = useCallback(
     (id: Id) => {
       resend.mutate(
-        { invitationId: id, inviterId: viewer.user.id },
+        { academyId, invitationId: id },
         {
           onSuccess: (invite) =>
             toast.success(
               `New invite sent to ${invite.email}. It works for 48 hours.`
             ),
-          onError: (error) => toast.error(error.message),
+          onError: (error) =>
+            toast.error(
+              errorMessage(error, "Couldn't resend the invite. Try again.")
+            ),
         }
       );
     },
-    [resend, viewer.user.id]
+    [resend, academyId]
   );
   const handleCancel = useCallback(
     (id: Id) => {
       cancel.mutate(
-        { invitationId: id },
+        { academyId, invitationId: id },
         {
           onSuccess: (invite) =>
             toast.success(`Invite to ${invite.email} cancelled`),
-          onError: (error) => toast.error(error.message),
+          onError: (error) =>
+            toast.error(
+              errorMessage(error, "Couldn't cancel the invite. Try again.")
+            ),
         }
       );
     },
-    [cancel]
+    [cancel, academyId]
   );
   const goTo = useNavigate();
-  const codes = useQuery(joinCodesQueryOptions(academyId)).data;
+  // Only the "Join codes" tab count; left out if it fails.
+  const codes = useQuery({
+    ...joinCodesQueryOptions(academyId),
+    throwOnError: false,
+  }).data;
   const activeCodes = codes?.filter((c) => c.status === "active").length;
   const handleTab = useCallback(
     (value: unknown) => {

@@ -19,7 +19,7 @@ import {
 import { cn } from "@hoops-genesis/ui/lib/utils";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-
+import { QueryBoundary } from "@/components/error-state";
 import { PlusIcon } from "@/components/icons";
 import { AcademyDetail } from "@/features/owner-academies/academy-detail";
 import {
@@ -202,13 +202,22 @@ export function AcademyConsole({ academyId }: { academyId?: Id }) {
           ))}
         </nav>
         {selectedId ? (
-          <AcademyDetail
-            academyId={selectedId}
+          <QueryBoundary
             className={cn(
-              "w-[440px] shrink-0 max-md:w-full max-lg:w-[360px]",
+              "w-[440px] shrink-0 self-start max-md:w-full max-lg:w-[360px]",
               !isDetailPage && "max-md:hidden"
             )}
-          />
+            resetKey={selectedId}
+            what="this academy"
+          >
+            <AcademyDetail
+              academyId={selectedId}
+              className={cn(
+                "w-[440px] shrink-0 max-md:w-full max-lg:w-[360px]",
+                !isDetailPage && "max-md:hidden"
+              )}
+            />
+          </QueryBoundary>
         ) : null}
       </div>
 

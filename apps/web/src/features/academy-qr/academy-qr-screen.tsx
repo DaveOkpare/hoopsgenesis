@@ -197,7 +197,7 @@ export function AcademyQrScreen({
   const academyId = membership?.academy.id ?? "";
   const timeZone = membership?.academy.timezone ?? "UTC";
   const qr = useQuery(academyQrQueryOptions(academyId));
-  const regenerate = useRegenerateAcademyQr(academyId, viewer.user.id);
+  const regenerate = useRegenerateAcademyQr(academyId);
 
   const handlePrint = useCallback(() => window.print(), []);
   const handleOpenReplace = useCallback(

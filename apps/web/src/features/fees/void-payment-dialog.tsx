@@ -27,8 +27,13 @@ import {
   periodKeyOf,
   periodShortLabel,
 } from "@/features/fees/periods";
-import { type PaymentRow, useVoidFee } from "@/features/fees/queries";
+import {
+  isAlreadyVoided,
+  type PaymentRow,
+  useVoidFee,
+} from "@/features/fees/queries";
 import type { Id } from "@/features/types";
+import { errorMessage } from "@/lib/api-client";
 import { firstName, formatDayMonth, formatMoney } from "@/lib/format";
 
 const MIN_REASON = 3;
@@ -165,7 +170,7 @@ function VoidForm({
   timeZone: string;
   onDone: () => void;
 }) {
-  const voidFee = useVoidFee(academyId, viewerId);
+  const voidFee = useVoidFee(academyId);
   const form = useForm({
     defaultValues: { reason: "", confirmed: false },
     validators: { onSubmit: schema },
@@ -179,9 +184,14 @@ function VoidForm({
           description: `${fee.student.name}'s ${periodShortLabel(periodKeyOf(fee.periodStart))} payment no longer counts.`,
         });
         onDone();
-      } catch {
+      } catch (error) {
+        if (isAlreadyVoided(error)) {
+          toast.error("This payment is already voided.");
+          onDone();
+          return;
+        }
         toast.error(
-          "The payment couldn't be voided. It may already be voided."
+          errorMessage(error, "The payment couldn't be voided. Try again.")
         );
       }
     },

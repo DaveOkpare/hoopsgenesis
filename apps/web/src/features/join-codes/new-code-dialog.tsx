@@ -36,7 +36,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import z from "zod";
-
+import { DIALOG_ERROR_CLASS, QueryBoundary } from "@/components/error-state";
 import { CodeReady } from "@/features/join-codes/code-ready";
 import {
   codeSummary,
@@ -52,7 +52,7 @@ import {
 } from "@/features/join-codes/queries";
 import { teamListQueryOptions } from "@/features/teams/queries";
 import type { Id } from "@/features/types";
-import { useViewer } from "@/features/viewer/queries";
+import { errorMessage } from "@/lib/api-client";
 
 const NO_TEAM = "none";
 const DAY_MS = 86_400_000;
@@ -444,15 +444,17 @@ const selectFooter = (state: FooterState): FooterState => ({
 function NewCodeForm({
   academyId,
   academyName,
+  initialTeamId,
   onCreated,
   timeZone,
 }: {
   academyId: Id;
   academyName: string;
+  /** Preselected team (e.g. "Make a join code" right after creating a team). */
+  initialTeamId?: Id;
   onCreated: (code: InvitationCode) => void;
   timeZone: string;
 }) {
-  const viewer = useViewer();
   const now = useJoinCodesNow();
   const create = useCreateJoinCode();
   const teams = useQuery(teamListQueryOptions(academyId)).data ?? [];
@@ -471,7 +473,7 @@ function NewCodeForm({
   const form = useForm({
     defaultValues: {
       role: "student",
-      teamId: NO_TEAM,
+      teamId: initialTeamId ?? NO_TEAM,
       uses: "one",
       upTo: "20",
       expiry: "7",
@@ -487,11 +489,12 @@ function NewCodeForm({
           teamId: value.teamId === NO_TEAM ? undefined : value.teamId,
           maxUses: maxUsesOf(value),
           expiresAt: expiresAt ?? undefined,
-          createdById: viewer.user.id,
         });
         onCreated(code);
-      } catch {
-        toast.error("Couldn't create the code. Try again.");
+      } catch (error) {
+        toast.error(
+          errorMessage(error, "Couldn't create the code. Try again.")
+        );
       }
     },
   });
@@ -591,6 +594,7 @@ export function NewCodeDialog({
   academyId,
   academyName,
   createdCode,
+  initialTeamId,
   onCreated,
   onOpenChange,
   open,
@@ -599,6 +603,8 @@ export function NewCodeDialog({
   academyId: Id;
   academyName: string;
   createdCode: InvitationCode | null;
+  /** Team to preselect in the form (`?new=1&teamId=<id>`). */
+  initialTeamId?: Id;
   onCreated: (code: InvitationCode) => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -626,12 +632,18 @@ export function NewCodeDialog({
               </DialogDescription>
             </DialogHeader>
             {open ? (
-              <NewCodeForm
-                academyId={academyId}
-                academyName={academyName}
-                onCreated={onCreated}
-                timeZone={timeZone}
-              />
+              <QueryBoundary
+                className={DIALOG_ERROR_CLASS}
+                what="the code form"
+              >
+                <NewCodeForm
+                  academyId={academyId}
+                  academyName={academyName}
+                  initialTeamId={initialTeamId}
+                  onCreated={onCreated}
+                  timeZone={timeZone}
+                />
+              </QueryBoundary>
             ) : null}
           </>
         )}

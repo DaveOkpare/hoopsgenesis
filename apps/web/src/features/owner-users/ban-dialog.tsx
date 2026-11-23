@@ -21,6 +21,7 @@ import {
   useBanUser,
   useUnbanUser,
 } from "@/features/owner-users/queries";
+import { errorMessage } from "@/lib/api-client";
 import { firstName } from "@/lib/format";
 
 const MIN_REASON = 3;
@@ -101,9 +102,7 @@ function BanForm({ user, onDone }: { user: PlatformUser; onDone: () => void }) {
         }
         onDone();
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Something went wrong"
-        );
+        toast.error(errorMessage(error, "Couldn't save that. Try again."));
       }
     },
   });

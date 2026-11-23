@@ -15,6 +15,9 @@ import {
   unbanUser,
 } from "@/features/owner-users/api";
 import type { Id } from "@/features/types";
+import { rememberImpersonator } from "@/features/viewer/api";
+import { useViewer, viewerKeys } from "@/features/viewer/queries";
+import { isUiPreview } from "@/lib/preview";
 
 export type {
   PlatformUser,
@@ -66,6 +69,41 @@ export function useRevokeUserSessions() {
   return useMutation({ mutationFn: revokeUserSessions, onSuccess: refresh });
 }
 
+/**
+ * "View as": the session becomes the other person's. Remembers the owner for the
+ * "Viewing as" banner, and drops every cached query (they were the owner's).
+ */
 export function useImpersonateUser() {
-  return useMutation({ mutationFn: impersonateUser });
+  const queryClient = useQueryClient();
+  const { user: owner } = useViewer();
+  return useMutation({
+    mutationFn: (input: { userId: Id }) => {
+      rememberImpersonator({
+        id: owner.id,
+        name: owner.name,
+        email: owner.email,
+        image: owner.image,
+      });
+      return impersonateUser(input);
+    },
+    onSuccess: () => {
+      if (!isUiPreview) {
+        // Only the viewer now: dropping everything would make this still-mounted
+        // screen refetch the owner's queries as the other person (403s). The
+        // owner's "platform" queries are dropped by `forgetOwnerQueries` once the
+        // screen has unmounted, and the exit banner clears everything again.
+        queryClient.removeQueries({ queryKey: viewerKeys.all });
+      }
+    },
+  });
+}
+
+/** After navigating away while impersonating: drop the owner's cached lists. */
+export function useForgetOwnerQueries() {
+  const queryClient = useQueryClient();
+  return () => {
+    if (!isUiPreview) {
+      queryClient.removeQueries({ queryKey: ["platform"] });
+    }
+  };
 }

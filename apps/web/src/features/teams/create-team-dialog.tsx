@@ -31,12 +31,12 @@ import {
   type MouseEvent,
   type ReactNode,
   useCallback,
-  useEffect,
   useMemo,
 } from "react";
 import { toast } from "sonner";
 import z from "zod";
 
+import { ErrorState, failedQueries } from "@/components/error-state";
 import { FormTextField } from "@/components/form-text-field";
 import {
   CoachChipsInput,
@@ -47,10 +47,12 @@ import {
   coachCandidatesQueryOptions,
   studentsWithoutTeamQueryOptions,
   teamListQueryOptions,
+  teamSportStored,
   useCreateTeam,
 } from "@/features/teams/queries";
 import type { Id, Team } from "@/features/types";
 import { useViewer } from "@/features/viewer/queries";
+import { errorMessage } from "@/lib/api-client";
 import { useIsPhone } from "@/lib/use-is-phone";
 
 const NAME_MAX = 40;
@@ -241,7 +243,7 @@ function StepCheckbox({
 
 function defaultCoachIds(candidates: CoachCandidate[], viewerId: Id): Id[] {
   const me = candidates.find((c) => c.user.id === viewerId);
-  return me ? [me.memberId] : [];
+  return me ? [me.user.id] : [];
 }
 
 function nextStepOf(value: {
@@ -275,10 +277,6 @@ function CreateTeamForm({
   const isPhone = useIsPhone();
   const createTeam = useCreateTeam();
   const schema = useMemo(() => buildSchema(takenNames), [takenNames]);
-  // The form mounts after its data loads, so the dialog's own initial focus can miss it.
-  useEffect(() => {
-    focusName()?.focus();
-  }, []);
   const form = useForm({
     defaultValues: {
       name: "",
@@ -297,13 +295,13 @@ function CreateTeamForm({
           name: value.name,
           ageGroup: value.ageGroup || null,
           sport: value.sport === "Other" ? null : value.sport,
-          coachMemberIds: value.coachIds,
+          coachUserIds: value.coachIds,
         });
         toast.success(`${team.name} created.`);
         onCreated(team, nextStepOf(value));
       } catch (error) {
         toast.error(
-          error instanceof Error ? error.message : "Couldn’t create the team."
+          errorMessage(error, "Couldn’t create the team. Try again.")
         );
       }
     },
@@ -330,6 +328,9 @@ function CreateTeamForm({
               {(field) => (
                 <FormTextField
                   autoComplete="off"
+                  // The form mounts once its data loads, which can be after the
+                  // dialog's initialFocus ran; autoFocus covers that case.
+                  autoFocus
                   className="py-[13px] text-base leading-5 max-md:px-4 max-md:py-3.5"
                   description="Must be different from your other teams."
                   descriptionClassName="text-[12px] leading-4 max-md:hidden"
@@ -359,14 +360,17 @@ function CreateTeamForm({
             }
           </form.Field>
         </div>
-        <form.Field name="sport">
-          {(field) => (
-            <SportField
-              onChange={field.handleChange}
-              value={field.state.value}
-            />
-          )}
-        </form.Field>
+        {/* No sport column on teams yet: the field shows only in preview. */}
+        {teamSportStored ? (
+          <form.Field name="sport">
+            {(field) => (
+              <SportField
+                onChange={field.handleChange}
+                value={field.state.value}
+              />
+            )}
+          </form.Field>
+        ) : null}
         <form.Field name="coachIds">
           {(field) => (
             <Field>
@@ -503,14 +507,26 @@ export function CreateTeamDialog({
   /** Called after the team exists, with the "Then fill the team" step to open (if any). */
   onCreated: (team: Team, next: CreateTeamNextStep | null) => void;
 }) {
-  const teams = useQuery(teamListQueryOptions(academyId));
-  const candidates = useQuery(coachCandidatesQueryOptions(academyId));
-  const withoutTeam = useQuery(studentsWithoutTeamQueryOptions(academyId));
+  // These load while the dialog is closed too, so a failure is shown inside the
+  // dialog (when it opens) instead of taking down the Teams page.
+  const teams = useQuery({
+    ...teamListQueryOptions(academyId),
+    throwOnError: false,
+  });
+  const candidates = useQuery({
+    ...coachCandidatesQueryOptions(academyId),
+    throwOnError: false,
+  });
+  const withoutTeam = useQuery({
+    ...studentsWithoutTeamQueryOptions(academyId),
+    throwOnError: false,
+  });
   const takenNames = useMemo(
     () => new Set((teams.data ?? []).map((t) => t.team.name.toLowerCase())),
     [teams.data]
   );
   const ready = Boolean(teams.data && candidates.data);
+  const failed = ready ? null : failedQueries(teams, candidates);
   const withoutTeamCount = withoutTeam.data?.length ?? 0;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -537,7 +553,16 @@ export function CreateTeamDialog({
             withoutTeamCount={withoutTeamCount}
           />
         ) : null}
-        {open && !ready ? <FormSkeleton /> : null}
+        {open && failed ? (
+          <DialogBody>
+            <ErrorState
+              error={failed.error}
+              onRetry={failed.retry}
+              what="the team form"
+            />
+          </DialogBody>
+        ) : null}
+        {open && !(ready || failed) ? <FormSkeleton /> : null}
       </DialogContent>
     </Dialog>
   );

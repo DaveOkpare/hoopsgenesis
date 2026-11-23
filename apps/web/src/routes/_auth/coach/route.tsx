@@ -3,31 +3,26 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/app-shell/app-shell";
 import { coachShell } from "@/components/app-shell/nav-config";
-import { reviewRecordsQueryOptions } from "@/features/records/queries";
-import { useActiveMembership, useViewer } from "@/features/viewer/queries";
+import { recordsToReviewQueryOptions } from "@/features/coach-today/queries";
+import { useActiveMembership } from "@/features/viewer/queries";
 import { hasActiveRole, homePathFor } from "@/features/viewer/selectors";
 
-/** Sidebar count from the designs, shown until the records query loads. */
-const NAV_COUNTS = { pendingRecords: 3 };
-
-/** Records waiting for this coach's review, for the sidebar. */
+/**
+ * Records waiting for this coach's review, for the sidebar. Same query as the Today
+ * panel; no count is shown until it loads.
+ */
 function useCoachNavCounts() {
-  const viewer = useViewer();
   const membership = useActiveMembership();
-  const pending = useQuery(
-    reviewRecordsQueryOptions(
+  const pending = useQuery({
+    ...recordsToReviewQueryOptions(
       membership?.academy.id ?? "",
-      {
-        kind: "coach",
-        viewerId: viewer.user.id,
-        teamIds: membership?.teams.map((team) => team.id) ?? [],
-      },
-      "pending"
-    )
-  );
-  return {
-    pendingRecords: pending.data?.length ?? NAV_COUNTS.pendingRecords,
-  };
+      membership?.teams ?? []
+    ),
+    enabled: Boolean(membership),
+    // A failed count must never take down the shell: it just shows no badge.
+    throwOnError: false,
+  });
+  return pending.data ? { pendingRecords: pending.data.length } : {};
 }
 
 export const Route = createFileRoute("/_auth/coach")({

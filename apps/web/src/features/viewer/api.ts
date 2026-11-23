@@ -1,28 +1,21 @@
 /*
- * MOCK-DATA CONVENTION (copy this for every feature)
+ * DATA-LAYER CONVENTION (copy this for every feature)
  *
- *   src/features/<feature>/api.ts      typed async functions, one per endpoint. Today they
- *                                      return fixtures; later they call the real endpoint.
- *                                      Swapping in the real API is a change to this file only.
- *   src/features/<feature>/queries.ts  TanStack Query `queryOptions` + mutation hooks that
- *                                      call api.ts. Components only import from here.
+ *   src/features/<feature>/api.ts       typed async functions, one per endpoint, calling the
+ *                                       real server: `lib/api-client.ts` for /api/v1 and
+ *                                       `lib/auth-client.ts` for Better Auth.
+ *   src/features/<feature>/api.mock.ts  the fixture implementation with the same exports,
+ *                                       used only in dev preview (see lib/preview.ts). Only
+ *                                       mock modules import fixtures.
+ *   src/features/<feature>/queries.ts   TanStack Query `queryOptions` + mutation hooks that
+ *                                       call api.ts. Components only import from here.
  *
  * Rules:
- * - Names and shapes mirror "API endpoints.md" (camelCase, ISO dates, money as strings).
- *   Shared types live in src/features/types.ts; feature-only types live in api.ts.
- * - Fixtures come from src/features/fixtures.ts (same people as the designs). Never import
- *   fixtures from components.
- * - Await `fixtureDelay()` so loading states are real.
- * - Mutations return what the real endpoint returns; queries.ts updates or invalidates the cache.
+ * - Shapes follow the server (camelCase, ISO dates, money as strings). Shared types live in
+ *   src/features/types.ts; feature-only types live in api.ts.
+ * - Mutations return what the endpoint returns; queries.ts updates or invalidates the cache.
  * - Academy-scoped query keys start with ["academies", academyId, "<resource>", ...params].
  */
-import {
-  academies,
-  fixtureDelay,
-  members,
-  teams,
-  users,
-} from "@/features/fixtures";
 import type {
   Academy,
   AcademyRole,
@@ -32,6 +25,12 @@ import type {
   User,
   UserSummary,
 } from "@/features/types";
+import { ApiError, unwrapAuth } from "@/lib/api-client";
+import { authClient } from "@/lib/auth-client";
+import { isUiPreview } from "@/lib/preview";
+
+const mock =
+  import.meta.env.DEV && isUiPreview ? () => import("./api.mock") : null;
 
 export interface Membership {
   academy: Academy;
@@ -58,118 +57,202 @@ export interface Viewer {
 /** Who to show in preview mode, picked from the URL (see src/lib/preview.ts). */
 export type ViewerPersona = "admin" | "owner" | "coach" | "student";
 
-function findUser(id: string): User {
-  const found = users.find((u) => u.id === id);
-  if (!found) {
-    throw new Error(`Fixture user ${id} is missing`);
-  }
-  return found;
+const ACADEMY_ROLES: readonly AcademyRole[] = ["admin", "coach", "student"];
+const BRAND_PREFIX = /^hoops\s+genesis\s+/i;
+
+/** "Hoops Genesis Kigali" -> "Kigali": the short name phones show. */
+export function academyShortName(name: string): string {
+  const short = name.replace(BRAND_PREFIX, "").trim();
+  return short || name;
 }
 
-function membershipsFor(userId: string): Membership[] {
-  return members
-    .filter((m) => m.userId === userId)
-    .flatMap((m) => {
-      const academy = academies.find((a) => a.id === m.academyId);
-      if (!academy) {
-        return [];
-      }
-      const memberTeams = teams
-        .filter((t) => m.teamIds.includes(t.id))
-        .map(({ id, name }) => ({ id, name }));
-      return [{ academy, roles: m.roles, teams: memberTeams }];
-    });
+/** `member.role` ("coach,student") as academy roles, unknown names dropped. */
+export function parseRoles(role: string | null | undefined): AcademyRole[] {
+  return (role ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part): part is AcademyRole =>
+      ACADEMY_ROLES.includes(part as AcademyRole)
+    );
 }
 
-/** Owner "view as" in preview mode (`?impersonating=1`); null otherwise. */
-function previewImpersonation(options: {
-  impersonating?: boolean;
-}): Impersonation | null {
-  if (!options.impersonating) {
+const toIso = (value: unknown): string =>
+  value instanceof Date ? value.toISOString() : String(value ?? "");
+
+const toDateOnly = (value: unknown): string | null => {
+  if (value === null || value === undefined || value === "") {
     return null;
   }
-  const innocent = findUser("user-innocent");
+  return toIso(value).slice(0, "YYYY-MM-DD".length);
+};
+
+/** A Better Auth organization row (with our additional fields) as an Academy. */
+export function toAcademy(org: Record<string, unknown>): Academy {
+  const name = String(org.name ?? "");
   return {
-    by: {
-      id: innocent.id,
-      name: innocent.name,
-      email: innocent.email,
-      image: null,
-    },
-    startedAt: "2026-11-23T08:02:00Z",
+    id: String(org.id),
+    name,
+    shortName: academyShortName(name),
+    slug: String(org.slug ?? ""),
+    logo: (org.logo as string | null | undefined) ?? null,
+    location: (org.location as string | null | undefined) ?? null,
+    timezone: String(org.timezone ?? "UTC"),
+    defaultCurrency: String(org.defaultCurrency ?? ""),
+    latitude: Number(org.latitude ?? 0),
+    longitude: Number(org.longitude ?? 0),
+    attendanceRadiusM: Number(org.attendanceRadiusM ?? 0),
+    createdAt: toIso(org.createdAt),
   };
 }
 
-/** Fixture viewer for each persona; mirrors the people in the designs. */
-export function fixtureViewer(
-  persona: ViewerPersona,
-  options: { impersonating?: boolean } = {}
-): Viewer {
-  switch (persona) {
-    case "owner":
-      return {
-        user: findUser("user-innocent"),
-        memberships: [],
-        activeAcademyId: null,
-        impersonation: null,
-      };
-    case "coach":
-      return {
-        user: findUser("user-sharika"),
-        memberships: membershipsFor("user-sharika")
-          .filter((m) => m.academy.id === "acad-kigali")
-          .map((m) => ({ ...m, roles: ["coach"] })),
-        activeAcademyId: "acad-kigali",
-        impersonation: previewImpersonation(options),
-      };
-    case "student":
-      return {
-        user: findUser("user-aline"),
-        memberships: membershipsFor("user-aline"),
-        activeAcademyId: "acad-kigali",
-        impersonation: previewImpersonation(options),
-      };
-    default: {
-      const innocent = findUser("user-innocent");
-      return {
-        user: findUser("user-sharika"),
-        memberships: membershipsFor("user-sharika"),
-        activeAcademyId: "acad-kigali",
-        impersonation: options.impersonating
-          ? {
-              by: {
-                id: innocent.id,
-                name: innocent.name,
-                email: innocent.email,
-                image: null,
-              },
-              startedAt: "2026-11-23T08:02:00Z",
-            }
-          : null,
-      };
-    }
+function toUser(raw: Record<string, unknown>): User {
+  return {
+    id: String(raw.id),
+    name: String(raw.name ?? ""),
+    email: String(raw.email ?? ""),
+    image: (raw.image as string | null | undefined) ?? null,
+    banned: raw.banned === true,
+    createdAt: toIso(raw.createdAt),
+    dateOfBirth: toDateOnly(raw.dateOfBirth),
+    phone: (raw.phone as string | null | undefined) ?? null,
+    platformRole: raw.role === "admin" ? "admin" : "user",
+  };
+}
+
+/*
+ * Better Auth's session names the impersonating owner only by id, and the impersonated
+ * user may not read other users. The owner's name is kept in sessionStorage when the
+ * owner starts impersonating (owner-users), and read back here for the banner.
+ */
+const IMPERSONATOR_KEY = "hoops.impersonator";
+
+export function rememberImpersonator(owner: UserSummary): void {
+  try {
+    sessionStorage.setItem(IMPERSONATOR_KEY, JSON.stringify(owner));
+  } catch {
+    // Storage can be unavailable (private mode); the banner then says "the owner".
   }
+}
+
+function readImpersonator(ownerId: Id): UserSummary {
+  try {
+    const raw = sessionStorage.getItem(IMPERSONATOR_KEY);
+    const stored = raw ? (JSON.parse(raw) as UserSummary) : null;
+    if (stored?.id === ownerId) {
+      return stored;
+    }
+  } catch {
+    // Fall through to the generic name.
+  }
+  return { id: ownerId, name: "the platform owner", email: "", image: null };
+}
+
+async function loadMemberships(): Promise<Membership[]> {
+  const [orgs, userTeams] = await Promise.all([
+    authClient.organization.list().then(unwrapAuth),
+    // Without arguments: the caller's teams across every academy.
+    authClient.organization.listUserTeams().then(unwrapAuth),
+  ]);
+  const roles = await Promise.all(
+    (orgs ?? []).map((org) =>
+      authClient.organization
+        .getActiveMemberRole({ query: { organizationId: org.id } })
+        .then(unwrapAuth)
+    )
+  );
+  const memberships = (orgs ?? []).map((org, index) => ({
+    academy: toAcademy(org as unknown as Record<string, unknown>),
+    roles: parseRoles(roles[index]?.role),
+    teams: (userTeams ?? [])
+      .filter((team) => team.organizationId === org.id)
+      .map((team) => ({ id: team.id, name: team.name })),
+  }));
+  // Oldest academy first, so a fresh session (no active academy yet) lands somewhere
+  // predictable rather than wherever the list happened to put it.
+  return memberships.sort((a, b) =>
+    a.academy.createdAt.localeCompare(b.academy.createdAt)
+  );
 }
 
 /**
  * The signed-in person, their academies and the active academy.
- * Real: `authClient.getSession()` (user, session.activeOrganizationId, impersonatedBy)
- * + `authClient.organization.list()` + `organization.getActiveMember()` per academy.
+ * `authClient.getSession()` (user, session.activeOrganizationId, impersonatedBy), then
+ * `organization.list()`, `organization.listUserTeams()` and
+ * `organization.getActiveMemberRole({ organizationId })` per academy. The platform owner
+ * is never an academy member, so they have no memberships.
  */
 export async function fetchViewer(): Promise<Viewer> {
-  await fixtureDelay();
-  return fixtureViewer("admin");
+  if (mock) {
+    return (await mock()).fetchViewer();
+  }
+  const result = unwrapAuth(await authClient.getSession());
+  if (!result) {
+    throw new ApiError({
+      status: 401,
+      code: "unauthorized",
+      message: "Not signed in",
+    });
+  }
+  const user = toUser(result.user as unknown as Record<string, unknown>);
+  const session = result.session as unknown as Record<string, unknown>;
+  const impersonatedBy = session.impersonatedBy as string | null | undefined;
+  const memberships =
+    user.platformRole === "admin" ? [] : await loadMemberships();
+  const stored = (session.activeOrganizationId as string | null) ?? null;
+  const activeAcademyId = memberships.some((m) => m.academy.id === stored)
+    ? stored
+    : (memberships[0]?.academy.id ?? null);
+  if (activeAcademyId && activeAcademyId !== stored) {
+    // Keep Better Auth's active academy in step with what the app shows.
+    await authClient.organization.setActive({
+      organizationId: activeAcademyId,
+    });
+  }
+  return {
+    user,
+    memberships,
+    activeAcademyId,
+    impersonation: impersonatedBy
+      ? {
+          by: readImpersonator(impersonatedBy),
+          startedAt: toIso(session.createdAt),
+        }
+      : null,
+  };
 }
 
-/** Real: `authClient.organization.setActive({ organizationId })`. */
+/** `authClient.organization.setActive({ organizationId })`. */
 export async function setActiveAcademy(input: {
   academyId: Id;
 }): Promise<{ activeAcademyId: Id }> {
-  await fixtureDelay();
+  if (mock) {
+    return (await mock()).setActiveAcademy(input);
+  }
+  unwrapAuth(
+    await authClient.organization.setActive({
+      organizationId: input.academyId,
+    })
+  );
   return { activeAcademyId: input.academyId };
 }
 
-/** Real: `authClient.admin.stopImpersonating()`. */
+/** `authClient.admin.stopImpersonating()`: back to the owner's own session. */
 export async function stopImpersonating(): Promise<void> {
-  await fixtureDelay();
+  if (mock) {
+    return (await mock()).stopImpersonating();
+  }
+  unwrapAuth(await authClient.admin.stopImpersonating());
+  try {
+    sessionStorage.removeItem(IMPERSONATOR_KEY);
+  } catch {
+    // Nothing to clean up.
+  }
+}
+
+/** `authClient.signOut()`. */
+export async function signOut(): Promise<void> {
+  if (mock) {
+    return;
+  }
+  unwrapAuth(await authClient.signOut());
 }

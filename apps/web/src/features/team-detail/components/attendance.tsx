@@ -3,12 +3,16 @@ import { cn } from "@hoops-genesis/ui/lib/utils";
 /** Below this, attendance shows in orange (55% on 4QT-0 / 4YX-0). */
 export const LOW_ATTENDANCE = 60;
 
-export function isLowAttendance(percent: number): boolean {
-  return percent < LOW_ATTENDANCE;
+/** null = no sessions counted yet (never low). */
+export function isLowAttendance(percent: number | null): boolean {
+  return percent !== null && percent < LOW_ATTENDANCE;
 }
 
 /** "92%" with the 80px bar from "U14 this month". */
-export function AttendanceBar({ percent }: { percent: number }) {
+export function AttendanceBar({ percent }: { percent: number | null }) {
+  if (percent === null) {
+    return <span className="text-muted text-sm leading-[18px]">—</span>;
+  }
   const low = isLowAttendance(percent);
   return (
     <span className="flex items-center gap-[10px]">
@@ -37,9 +41,16 @@ export function AttendancePercent({
   percent,
   className,
 }: {
-  percent: number;
+  percent: number | null;
   className?: string;
 }) {
+  if (percent === null) {
+    return (
+      <span className={cn("text-muted text-sm leading-[18px]", className)}>
+        —
+      </span>
+    );
+  }
   return (
     <span
       className={cn(

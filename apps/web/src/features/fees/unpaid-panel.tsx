@@ -155,7 +155,7 @@ export function TeamChips({
   onTeamChange: (teamId: Id | null) => void;
 }) {
   return (
-    <fieldset className="-mx-5 flex gap-2 overflow-x-auto px-5 md:hidden">
+    <fieldset className="-mx-5 flex min-w-0 gap-2 overflow-x-auto px-5 md:hidden">
       <legend className="sr-only">Filter by team</legend>
       <TeamChip
         count={null}

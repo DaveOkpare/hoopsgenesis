@@ -17,10 +17,12 @@ import {
 import {
   fetchViewer,
   setActiveAcademy,
+  signOut,
   stopImpersonating,
   type Viewer,
 } from "@/features/viewer/api";
 import { getActiveMembership } from "@/features/viewer/selectors";
+import { isUiPreview } from "@/lib/preview";
 
 export const viewerKeys = {
   all: ["viewer"] as const,
@@ -61,14 +63,32 @@ export function useSetActiveAcademy() {
   });
 }
 
+/** Back to the owner's own session; everything cached belonged to the other user. */
 export function useStopImpersonating() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: stopImpersonating,
     onSuccess: () => {
-      queryClient.setQueryData<Viewer>(viewerKeys.all, (viewer) =>
-        viewer ? { ...viewer, impersonation: null } : viewer
-      );
+      if (isUiPreview) {
+        queryClient.setQueryData<Viewer>(viewerKeys.all, (viewer) =>
+          viewer ? { ...viewer, impersonation: null } : viewer
+        );
+        return;
+      }
+      queryClient.removeQueries();
+    },
+  });
+}
+
+/** Signs out and drops every cached query (they belonged to this session). */
+export function useSignOut() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: signOut,
+    onSettled: () => {
+      if (!isUiPreview) {
+        queryClient.removeQueries();
+      }
     },
   });
 }

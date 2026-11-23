@@ -9,12 +9,6 @@ import type {
 } from "@/features/student-records/queries";
 import { firstName } from "@/lib/format";
 
-export interface AthleticResult {
-  attempts: number;
-  drill: string;
-  made: number;
-}
-
 export interface AcademicData {
   averagePercent: number | null;
   classSize: number | null;
@@ -24,8 +18,13 @@ export interface AcademicData {
   issuedBy: string | null;
   kind: AcademicKind;
   note: string | null;
+  /** Report card notes (server template). */
+  notes: string | null;
   position: number | null;
   school: string | null;
+  schoolYear: string | null;
+  /** "Maths A1, English B2" (server template). */
+  subjects: string | null;
   term: string | null;
   title: string | null;
 }
@@ -40,28 +39,39 @@ function num(value: unknown): number | null {
 
 const KINDS: readonly AcademicKind[] = ["report_card", "certificate", "other"];
 
-export function athleticResult(
-  record: StudentRecordView
-): AthleticResult | null {
-  if (record.recordType !== "athletic") {
+function subjectsText(value: unknown): string | null {
+  if (!Array.isArray(value)) {
     return null;
   }
-  const drill = text(record.data.drill);
-  const made = num(record.data.made);
-  const attempts = num(record.data.attempts);
-  if (!drill || made === null || attempts === null) {
-    return null;
-  }
-  return { drill, made, attempts };
+  const parts = value.flatMap((item: unknown) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const { subject, grade } = item as { subject?: unknown; grade?: unknown };
+    return typeof subject === "string"
+      ? [[subject, typeof grade === "string" ? grade : ""].join(" ").trim()]
+      : [];
+  });
+  return parts.length > 0 ? parts.join(", ") : null;
 }
 
+/**
+ * The academic fields of a record. Server records follow the `report_card` template
+ * (schoolName, term, schoolYear, subjects, averageScore, notes); preview fixtures use
+ * the design's fields (kind, school, averagePercent, position, ...). Both are read.
+ */
 export function academicData(record: StudentRecordView): AcademicData {
-  const kind = KINDS.find((k) => k === record.data.kind) ?? "other";
+  const kind =
+    KINDS.find((k) => k === (record.data.kind ?? record.template)) ?? "other";
   return {
     kind,
-    school: text(record.data.school),
+    school: text(record.data.school) ?? text(record.data.schoolName),
     term: text(record.data.term),
-    averagePercent: num(record.data.averagePercent),
+    schoolYear: text(record.data.schoolYear),
+    subjects: subjectsText(record.data.subjects),
+    notes: text(record.data.notes),
+    averagePercent:
+      num(record.data.averagePercent) ?? num(record.data.averageScore),
     position: num(record.data.position),
     classSize: num(record.data.classSize),
     title: text(record.data.title),

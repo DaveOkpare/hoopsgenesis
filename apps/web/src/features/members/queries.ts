@@ -11,16 +11,16 @@ import {
   inviteMembers,
   listInvitations,
   listMembers,
-  referenceNow,
   resendInvitation,
 } from "@/features/members/api";
 import type { Id } from "@/features/types";
+import { appNow } from "@/lib/preview";
 
 export type { InvitableRole, MemberCounts } from "@/features/members/api";
 
-/** "Now" for relative dates ("sent 2 days ago"); the fixture clock until the API is real. */
+/** "Now" for relative dates ("sent 2 days ago"); the designs' moment in preview. */
 export function useReferenceNow(): Date {
-  return referenceNow();
+  return appNow();
 }
 
 export const memberKeys = {
@@ -84,7 +84,7 @@ export function useResendInvitation() {
   const refresh = useRefreshInvites();
   return useMutation({
     mutationFn: resendInvitation,
-    onSuccess: (invite) => refresh(invite.academyId),
+    onSuccess: (_invite, input) => refresh(input.academyId),
   });
 }
 
@@ -92,6 +92,6 @@ export function useCancelInvitation() {
   const refresh = useRefreshInvites();
   return useMutation({
     mutationFn: cancelInvitation,
-    onSuccess: (invite) => refresh(invite.academyId),
+    onSuccess: (_invite, input) => refresh(input.academyId),
   });
 }

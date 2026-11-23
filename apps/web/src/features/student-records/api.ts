@@ -1,17 +1,9 @@
 /*
- * Student records (ST-6 upload, ST-7 progress). Mock-data convention: see
- * features/viewer/api.ts. The fixture store is in memory, so a record uploaded in this
- * session shows up until the page reloads.
+ * Student records (ST-6 upload, ST-7 progress). Data-layer convention: see
+ * features/viewer/api.ts.
  */
-import { fixtureDelay, members, users } from "@/features/fixtures";
-import {
-  type FixtureReview,
-  fixtureRecords,
-} from "@/features/student-records/fixtures";
-import {
-  uploadContentType,
-  uploadProblem,
-} from "@/features/student-records/upload-rules";
+import { loadMyTeams } from "@/features/student-calendar/api";
+import { uploadContentType } from "@/features/student-records/upload-rules";
 import type {
   AcademyRole,
   DateOnly,
@@ -19,9 +11,19 @@ import type {
   Paginated,
   RecordStatus,
   RecordType,
-  StudentRecord,
   Timestamp,
 } from "@/features/types";
+import {
+  ApiError,
+  academyPath,
+  apiAll,
+  apiData,
+  isApiError,
+} from "@/lib/api-client";
+import { isUiPreview } from "@/lib/preview";
+
+const mock =
+  import.meta.env.DEV && isUiPreview ? () => import("./api.mock") : null;
 
 /** A person named on a record, with their roles in the academy (for "Coach Patrick"). */
 export interface PersonRef {
@@ -31,58 +33,141 @@ export interface PersonRef {
 }
 
 /**
- * A record as the student's screens show it. `recordedByPerson`, `reviewedBy` and
- * `reviewedAt` are assumed to be joined by the server: the schema has `verifiedBy` but
- * nothing that says who rejected a record or when it was reviewed.
+ * A record as the student's screens show it (the server's record shape, with people
+ * resolved). `reviewedBy` is whoever verified or rejected it (the server keeps both in
+ * `verifiedBy`); the server does not store when it was reviewed, so `reviewedAt` is
+ * null in real mode.
  */
-export interface StudentRecordView extends StudentRecord {
+export interface StudentRecordView {
+  academyId: Id;
+  createdAt: Timestamp;
+  /** Validated on the server against `data.template` + `schemaVersion`. */
+  data: Record<string, unknown>;
+  /** Short-lived signed URL, only from GET /records/:id. */
+  fileUrl: string | null;
+  hasFile: boolean;
+  id: Id;
   recordedByPerson: PersonRef | null;
+  recordedOn: DateOnly;
+  recordType: RecordType;
   reviewedAt: Timestamp | null;
   reviewedBy: PersonRef | null;
+  reviewNote: string | null;
+  schemaVersion: number;
+  status: RecordStatus;
+  studentId: Id;
+  /** `data.template`, e.g. "report_card" or "sprint_100m". */
+  template: string | null;
 }
 
-/** Report card, certificate or other academic document (data.kind). */
+/** Report card, certificate or other academic document (the template key). */
 export type AcademicKind = "report_card" | "certificate" | "other";
+
+/** For progress charts: which field is the result, and which way is better. */
+export interface RecordMetric {
+  better: "higher" | "lower";
+  field: string;
+  label: string;
+  unit: string | null;
+}
+
+/** One entry of GET /record-templates. */
+export interface RecordTemplate {
+  description: string;
+  /** JSON Schema of `data` (the form's fields are its `properties`). */
+  jsonSchema: { properties?: Record<string, unknown>; required?: string[] };
+  key: string;
+  label: string;
+  latest: boolean;
+  metrics: RecordMetric[];
+  recordType: RecordType;
+  schemaVersion: number;
+}
 
 export interface ListRecordsParams {
   recordType?: RecordType;
   status?: RecordStatus;
 }
 
-type StoredRecord = StudentRecord & { review: FixtureReview | null };
-
-const store: StoredRecord[] = [...fixtureRecords];
-
-function person(userId: Id | null, academyId: Id): PersonRef | null {
-  const found = users.find((u) => u.id === userId);
-  if (!found) {
-    return null;
-  }
-  const membership = members.find(
-    (m) => m.userId === found.id && m.academyId === academyId
-  );
-  return { id: found.id, name: found.name, roles: membership?.roles ?? [] };
+interface NameRef {
+  id: Id;
+  name: string;
 }
 
-function toView({ review, ...record }: StoredRecord): StudentRecordView {
+/** A record as the server sends it. */
+interface RecordRow {
+  academyId: Id;
+  createdAt: Timestamp;
+  data: Record<string, unknown>;
+  file?: { expiresAt: Timestamp; url: string } | null;
+  hasFile: boolean;
+  id: Id;
+  recordedBy: NameRef | null;
+  recordedById: Id;
+  recordedOn: DateOnly;
+  recordType: RecordType;
+  reviewNote: string | null;
+  schemaVersion: number;
+  status: RecordStatus;
+  studentId: Id;
+  template: string | null;
+  verifiedBy: NameRef | null;
+  verifiedById: Id | null;
+}
+
+type Roles = Map<Id, { roles: AcademyRole[] }>;
+
+async function loadRoles(academyId: Id): Promise<Roles> {
+  try {
+    return (await loadMyTeams(academyId)).people;
+  } catch {
+    // Without the roster, people are shown by name only.
+    return new Map();
+  }
+}
+
+function person(ref: NameRef | null, roles: Roles): PersonRef | null {
+  return ref
+    ? { id: ref.id, name: ref.name, roles: roles.get(ref.id)?.roles ?? [] }
+    : null;
+}
+
+function toView(row: RecordRow, roles: Roles): StudentRecordView {
   return {
-    ...record,
-    recordedByPerson: person(record.recordedBy, record.academyId),
-    reviewedBy: review ? person(review.reviewedBy, record.academyId) : null,
-    reviewedAt: review?.reviewedAt ?? null,
+    id: row.id,
+    academyId: row.academyId,
+    studentId: row.studentId,
+    recordType: row.recordType,
+    template: row.template,
+    schemaVersion: row.schemaVersion,
+    recordedOn: row.recordedOn,
+    data: row.data,
+    status: row.status,
+    reviewNote: row.reviewNote,
+    createdAt: row.createdAt,
+    hasFile: row.hasFile,
+    fileUrl: row.file?.url ?? null,
+    recordedByPerson: person(row.recordedBy, roles),
+    reviewedBy: row.status === "pending" ? null : person(row.verifiedBy, roles),
+    reviewedAt: null,
   };
 }
 
-/** Error with the API's `{ error: { code, message } }` code. */
-export class ApiError extends Error {
-  readonly code: string;
-  readonly status: number;
-  constructor(status: number, code: string, message: string) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.code = code;
+/**
+ * GET /api/v1/academies/:academyId/record-templates?latest=true
+ * The forms records are made from, with the metrics progress charts use.
+ */
+export async function listRecordTemplates(
+  academyId: Id,
+  recordType?: RecordType
+): Promise<RecordTemplate[]> {
+  if (mock) {
+    return (await mock()).listRecordTemplates(academyId, recordType);
   }
+  return await apiData<RecordTemplate[]>(
+    academyPath(academyId, "/record-templates"),
+    { query: { latest: "true", recordType } }
+  );
 }
 
 /**
@@ -94,40 +179,35 @@ export async function listStudentRecords(
   studentId: Id,
   params: ListRecordsParams = {}
 ): Promise<Paginated<StudentRecordView>> {
-  await fixtureDelay();
-  const data = store
-    .filter(
-      (r) =>
-        r.academyId === academyId &&
-        r.studentId === studentId &&
-        (!params.recordType || r.recordType === params.recordType) &&
-        (!params.status || r.status === params.status)
-    )
-    .sort(
-      (a, b) =>
-        b.recordedOn.localeCompare(a.recordedOn) ||
-        b.createdAt.localeCompare(a.createdAt)
-    )
-    .map(toView);
-  return { data, nextCursor: null };
+  if (mock) {
+    return (await mock()).listStudentRecords(academyId, studentId, params);
+  }
+  const [rows, roles] = await Promise.all([
+    apiAll<RecordRow>(
+      academyPath(academyId, `/students/${studentId}/records`),
+      { query: { recordType: params.recordType, status: params.status } }
+    ),
+    loadRoles(academyId),
+  ]);
+  return { data: rows.map((row) => toView(row, roles)), nextCursor: null };
 }
 
 /**
  * GET /api/v1/academies/:academyId/records/:id
- * `fileUrl` is a short-lived signed URL (null in fixtures).
+ * `fileUrl` is a short-lived signed URL when the record has a file.
  */
 export async function getRecord(
   academyId: Id,
   recordId: Id
 ): Promise<StudentRecordView> {
-  await fixtureDelay();
-  const found = store.find(
-    (r) => r.id === recordId && r.academyId === academyId
-  );
-  if (!found) {
-    throw new ApiError(404, "not_found", "Record not found");
+  if (mock) {
+    return (await mock()).getRecord(academyId, recordId);
   }
-  return toView(found);
+  const [row, roles] = await Promise.all([
+    apiData<RecordRow>(academyPath(academyId, `/records/${recordId}`)),
+    loadRoles(academyId),
+  ]);
+  return toView(row, roles);
 }
 
 export interface CreateUploadInput {
@@ -136,31 +216,58 @@ export interface CreateUploadInput {
   size: number;
 }
 
+export interface SignedUpload {
+  fileKey: string;
+  headers: Record<string, string>;
+  method: string;
+  uploadUrl: string;
+}
+
 /**
  * POST /api/v1/academies/:academyId/uploads
  * Checks type (PDF, JPEG, PNG) and size (up to 10 MB) and returns a signed URL to put
- * the file straight into the private bucket.
+ * the file straight into the private bucket. 503 `storage_not_configured` when the
+ * server has no bucket.
  */
 export async function createUpload(
-  _academyId: Id,
+  academyId: Id,
   input: CreateUploadInput
-): Promise<{ fileKey: string; uploadUrl: string }> {
-  await fixtureDelay();
-  const problem = uploadProblem({
-    name: input.fileName,
-    size: input.size,
-    type: input.contentType,
-  });
-  if (problem) {
-    throw new ApiError(400, "invalid_upload", problem);
+): Promise<SignedUpload> {
+  if (mock) {
+    return (await mock()).createUpload(academyId, input);
   }
-  const fileKey = `tmp/${crypto.randomUUID()}/${input.fileName}`;
-  return { fileKey, uploadUrl: `https://uploads.invalid/${fileKey}` };
+  return await apiData<SignedUpload>(academyPath(academyId, "/uploads"), {
+    method: "POST",
+    body: input,
+  });
 }
 
-/** PUT the file to the signed URL. Fixtures: nothing is sent. */
-async function putFile(_uploadUrl: string, _file: File): Promise<void> {
-  await fixtureDelay();
+/** PUT the file to the signed URL with exactly the headers the server signed. */
+async function putFile(upload: SignedUpload, file: File): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(upload.uploadUrl, {
+      method: upload.method || "PUT",
+      headers: upload.headers,
+      body: file,
+    });
+  } catch (error) {
+    throw new ApiError(
+      {
+        status: 0,
+        code: "upload_failed",
+        message: "The file didn’t upload. Check your connection and try again.",
+      },
+      { cause: error }
+    );
+  }
+  if (!response.ok) {
+    throw new ApiError({
+      status: response.status,
+      code: "upload_failed",
+      message: "The file didn’t upload. Try again.",
+    });
+  }
 }
 
 export interface CreateRecordInput {
@@ -180,59 +287,68 @@ export async function createRecord(
   studentId: Id,
   input: CreateRecordInput
 ): Promise<StudentRecordView> {
-  await fixtureDelay();
-  const record: StoredRecord = {
-    id: `record-${crypto.randomUUID()}`,
-    academyId,
-    studentId,
-    recordType: input.recordType,
-    recordedBy: studentId,
-    recordedOn: input.recordedOn,
-    data: input.data,
-    schemaVersion: input.schemaVersion,
-    fileUrl: null,
-    status: "pending",
-    verifiedBy: null,
-    createdAt: new Date().toISOString(),
-    reviewNote: null,
-    review: null,
-  };
-  store.push(record);
-  return toView(record);
+  if (mock) {
+    return (await mock()).createRecord(academyId, studentId, input);
+  }
+  const [row, roles] = await Promise.all([
+    apiData<RecordRow>(
+      academyPath(academyId, `/students/${studentId}/records`),
+      { method: "POST", body: input }
+    ),
+    loadRoles(academyId),
+  ]);
+  return toView(row, roles);
 }
 
 export interface UploadRecordInput {
   academyId: Id;
+  /** The template's fields, `template` included. */
   data: Record<string, unknown>;
   file: File;
   recordedOn: DateOnly;
+  schemaVersion: number;
   studentId: Id;
+}
+
+export interface UploadRecordResult {
+  /** False when the server has no file storage: the record was saved without it. */
+  fileSaved: boolean;
+  record: StudentRecordView;
 }
 
 /**
  * Upload an academic record in one go: POST /uploads, PUT the file, then
- * POST /students/:studentId/records with the fileKey. Resolves to the new, pending record.
+ * POST /students/:studentId/records with the fileKey. When the server has no storage
+ * (503 `storage_not_configured`) the record is still saved, without the file (records
+ * without files are allowed), and `fileSaved` says so.
  */
 export async function uploadRecord(
   input: UploadRecordInput
-): Promise<StudentRecordView> {
+): Promise<UploadRecordResult> {
+  if (mock) {
+    return (await mock()).uploadRecord(input);
+  }
   const contentType = uploadContentType(input.file) ?? input.file.type;
-  const { fileKey, uploadUrl } = await createUpload(input.academyId, {
-    fileName: input.file.name,
-    contentType,
-    size: input.file.size,
-  });
-  await putFile(uploadUrl, input.file);
-  return createRecord(input.academyId, input.studentId, {
+  let fileKey: string | undefined;
+  try {
+    const upload = await createUpload(input.academyId, {
+      fileName: input.file.name,
+      contentType,
+      size: input.file.size,
+    });
+    await putFile(upload, input.file);
+    ({ fileKey } = upload);
+  } catch (error) {
+    if (!isApiError(error, "storage_not_configured")) {
+      throw error;
+    }
+  }
+  const record = await createRecord(input.academyId, input.studentId, {
     recordType: "academic",
     recordedOn: input.recordedOn,
-    schemaVersion: 1,
-    fileKey,
-    data: {
-      ...input.data,
-      fileName: input.file.name,
-      fileSize: input.file.size,
-      contentType,
-    },
+    schemaVersion: input.schemaVersion,
+    data: input.data,
+    ...(fileKey ? { fileKey } : {}),
   });
+  return { record, fileSaved: fileKey !== undefined };
 }

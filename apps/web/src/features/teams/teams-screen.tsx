@@ -342,8 +342,12 @@ export function TeamsScreen({
   onCreate: () => void;
 }) {
   const { data } = useQuery(teamListQueryOptions(academyId));
+  // Only the "students without a team" nudge: left out if it fails.
   const withoutTeam =
-    useQuery(studentsWithoutTeamQueryOptions(academyId)).data ?? [];
+    useQuery({
+      ...studentsWithoutTeamQueryOptions(academyId),
+      throwOnError: false,
+    }).data ?? [];
   const items = forceEmpty ? [] : data;
   const hasTeams = Boolean(items && items.length > 0);
   const studentTotal = items?.reduce((sum, t) => sum + t.studentCount, 0) ?? 0;

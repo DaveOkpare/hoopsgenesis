@@ -24,20 +24,23 @@ function plural(count: number, word: string): string {
 }
 
 /** Five weekly bars; the last (this week) is ink. Heights scale to the best week. */
-function WeeklyBars({ values }: { values: number[] }) {
-  const max = Math.max(...values, 1);
+function WeeklyBars({
+  weeks,
+}: {
+  weeks: { weekStart: string; percent: number }[];
+}) {
+  const max = Math.max(...weeks.map((week) => week.percent), 1);
+  const thisWeek = weeks.at(-1)?.weekStart;
   return (
     <div aria-hidden="true" className="flex h-10 items-end gap-1">
-      {values.map((value, index) => (
+      {weeks.map((week) => (
         <div
           className={cn(
             "w-2 shrink-0 rounded-[3px]",
-            index === values.length - 1 ? "bg-ink" : "bg-stone"
+            week.weekStart === thisWeek ? "bg-ink" : "bg-stone"
           )}
-          // Bars are positional (oldest to newest), so the index is the identity.
-          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length weekly series
-          key={index}
-          style={{ height: Math.round((value / max) * BAR_MAX_HEIGHT) }}
+          key={week.weekStart}
+          style={{ height: Math.round((week.percent / max) * BAR_MAX_HEIGHT) }}
         />
       ))}
     </div>
@@ -106,7 +109,7 @@ export function DesktopMetrics({
           <StatLabel arrow>Attendance this week</StatLabel>
           <div className="flex items-end justify-between">
             <StatValue>{attendance.thisWeekPercent}%</StatValue>
-            <WeeklyBars values={attendance.weeklyPercent} />
+            <WeeklyBars weeks={attendance.weekly} />
           </div>
           <StatHint>
             <Trend points={attendance.changePts} /> vs last week

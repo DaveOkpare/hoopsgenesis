@@ -19,8 +19,10 @@ import type {
   User,
 } from "@/features/types";
 
+import { PREVIEW_NOW } from "@/lib/preview";
+
 /** The moment every design is drawn at: Mon 23 Nov 2026, 10:02 in Kigali. */
-export const FIXTURE_NOW = new Date("2026-11-23T08:02:00Z");
+export const FIXTURE_NOW = PREVIEW_NOW;
 
 const CREATED = "2026-03-01T08:00:00Z";
 

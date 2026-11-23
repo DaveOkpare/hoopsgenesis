@@ -10,7 +10,10 @@ import { firstName } from "@/lib/format";
 
 /** "U14 Training" (or "U14 · Training" with sep " · "); other events keep their title. */
 export function eventTitle(event: StudentEvent, sep = " "): string {
-  if (event.eventType === "training" && event.teamName) {
+  const named =
+    event.teamName &&
+    event.title.toLowerCase().startsWith(event.teamName.toLowerCase());
+  if (event.eventType === "training" && event.teamName && !named) {
     return `${event.teamName}${sep}${event.title}`;
   }
   return event.title;

@@ -7,15 +7,19 @@ import {
 import {
   getRecord,
   type ListRecordsParams,
+  listRecordTemplates,
   listStudentRecords,
   uploadRecord,
 } from "@/features/student-records/api";
-import type { Id } from "@/features/types";
+import type { Id, RecordType } from "@/features/types";
 
 export type {
   AcademicKind,
   PersonRef,
+  RecordMetric,
+  RecordTemplate,
   StudentRecordView,
+  UploadRecordResult,
 } from "@/features/student-records/api";
 
 export const studentRecordKeys = {
@@ -29,7 +33,21 @@ export const studentRecordKeys = {
     ] as const,
   detail: (academyId: Id, recordId: Id) =>
     [...studentRecordKeys.all(academyId), "detail", recordId] as const,
+  templates: (academyId: Id, recordType: RecordType | undefined) =>
+    ["academies", academyId, "record-templates", recordType ?? "all"] as const,
 };
+
+/** The record templates (app config on the server; they rarely change). */
+export function recordTemplatesQueryOptions(
+  academyId: Id,
+  recordType?: RecordType
+) {
+  return queryOptions({
+    queryKey: studentRecordKeys.templates(academyId, recordType),
+    queryFn: () => listRecordTemplates(academyId, recordType),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
 
 export function studentRecordsQueryOptions(
   academyId: Id,
@@ -56,7 +74,7 @@ export function useUploadRecord() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: uploadRecord,
-    onSuccess: async (record) => {
+    onSuccess: async ({ record }) => {
       queryClient.setQueryData(
         studentRecordKeys.detail(record.academyId, record.id),
         record

@@ -19,6 +19,7 @@ import { toast } from "sonner";
 
 import { TickIcon } from "@/components/coach/coach-icons";
 import { StudentFace } from "@/features/sessions/components/roster";
+import { sessionErrorMessage } from "@/features/sessions/model";
 import {
   asOfKey,
   type Session,
@@ -36,14 +37,12 @@ export function CheckInDialog({
   session,
   entry,
   academyId,
-  viewerId,
   now,
   onClose,
 }: {
   session: Session;
   entry: SessionEntry | null;
   academyId: Id;
-  viewerId: Id;
   now: Date;
   onClose: () => void;
 }) {
@@ -63,7 +62,6 @@ export function CheckInDialog({
         {
           eventId: session.event.id,
           sessionDate: session.sessionDate,
-          recordedBy: viewerId,
           asOf,
           entries: [
             {
@@ -86,11 +84,11 @@ export function CheckInDialog({
             setNote("");
             onClose();
           },
-          onError: (error) => toast.error(error.message),
+          onError: (error) => toast.error(sessionErrorMessage(error)),
         }
       );
     },
-    [entry, mutate, note, now, onClose, session, viewerId]
+    [entry, mutate, note, now, onClose, session]
   );
 
   const handleNote = useCallback(

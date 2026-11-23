@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { MobileAcademyBar } from "@/components/app-shell/academy-switcher";
+import { QueryBoundary } from "@/components/error-state";
 import { myAttendanceQueryOptions } from "@/features/student-attendance/queries";
 import { summarizeAttendance } from "@/features/student-attendance/summary";
 import {
@@ -36,8 +37,16 @@ import {
   type SessionState,
 } from "@/features/student-home/queries";
 import { SessionCard } from "@/features/student-home/session-card";
-import { drillProgress } from "@/features/student-progress/selectors";
-import { studentRecordsQueryOptions } from "@/features/student-records/queries";
+import {
+  drillProgress,
+  resultSeries,
+  seriesResult,
+} from "@/features/student-progress/selectors";
+import {
+  recordTemplatesQueryOptions,
+  studentRecordsQueryOptions,
+} from "@/features/student-records/queries";
+import type { CalendarEvent, DateOnly, Id } from "@/features/types";
 import { useViewer } from "@/features/viewer/queries";
 import {
   firstName,
@@ -63,38 +72,12 @@ function StudentHome() {
   const { session: preview } = Route.useSearch();
   const viewer = useViewer();
   const { academyId, now, timeZone, today } = useAcademyClock();
-  const month = monthOf(today);
   const name = firstName(viewer.user.name);
 
-  const session = useQuery(nextSessionQueryOptions(academyId, preview));
+  const session = useQuery(
+    nextSessionQueryOptions(academyId, preview, timeZone)
+  );
   const fees = useQuery(myFeesQueryOptions(academyId));
-  const upcoming = useQuery(
-    studentEventsQueryOptions(academyId, {
-      from: today,
-      to: addDays(today, COMING_UP_DAYS),
-    })
-  );
-  const attendance = useQuery(
-    myAttendanceQueryOptions(academyId, {
-      from: firstOfMonth(month),
-      to: today,
-    })
-  );
-  const results = useQuery(
-    studentRecordsQueryOptions(academyId, viewer.user.id, {
-      recordType: "athletic",
-    })
-  );
-
-  const sessionEvent = session.data?.event;
-  const comingUp = (upcoming.data ?? [])
-    .filter(
-      (event) =>
-        event.id !== sessionEvent?.id &&
-        event.startDate > (sessionEvent?.startDate ?? today) &&
-        !event.excludedDates.includes(event.startDate)
-    )
-    .slice(0, COMING_UP_COUNT);
   const due = fees.data?.due ?? null;
 
   return (
@@ -141,28 +124,120 @@ function StudentHome() {
         {due ? <FeeDueNudge due={due} today={today} /> : null}
       </div>
 
-      {upcoming.data ? <ComingUp events={comingUp} /> : null}
+      {/* Each tile below loads on its own: one failing shows its own "Try again". */}
+      <QueryBoundary what="what’s coming up">
+        <ComingUpSection
+          academyId={academyId}
+          sessionEvent={session.data?.event}
+          today={today}
+        />
+      </QueryBoundary>
 
       <div className="flex gap-5 max-md:hidden">
-        {attendance.data ? (
-          <AttendanceTile
-            monthName={monthName(month)}
-            summary={summarizeAttendance(attendance.data)}
-          />
-        ) : (
-          <Skeleton className="h-[177px] flex-1 rounded-lg" />
-        )}
-        {results.data ? (
-          <ResultTile
-            label="Free throws"
-            progress={drillProgress(results.data, "free_throws")}
+        <QueryBoundary className="flex-1" what="your attendance">
+          <AttendanceSection academyId={academyId} today={today} />
+        </QueryBoundary>
+        <QueryBoundary className="flex-1" what="your results">
+          <ResultSection
+            academyId={academyId}
             today={today}
+            viewerId={viewer.user.id}
           />
-        ) : (
-          <Skeleton className="h-[177px] flex-1 rounded-lg" />
-        )}
+        </QueryBoundary>
         <UploadTile />
       </div>
     </div>
+  );
+}
+
+function ComingUpSection({
+  academyId,
+  sessionEvent,
+  today,
+}: {
+  academyId: Id;
+  sessionEvent: CalendarEvent | undefined;
+  today: DateOnly;
+}) {
+  const upcoming = useQuery(
+    studentEventsQueryOptions(academyId, {
+      from: today,
+      to: addDays(today, COMING_UP_DAYS),
+    })
+  );
+  if (!upcoming.data) {
+    return null;
+  }
+  const comingUp = upcoming.data
+    .filter(
+      (event) =>
+        event.id !== sessionEvent?.id &&
+        event.startDate > (sessionEvent?.startDate ?? today) &&
+        !event.excludedDates.includes(event.startDate)
+    )
+    .slice(0, COMING_UP_COUNT);
+  return <ComingUp events={comingUp} />;
+}
+
+function AttendanceSection({
+  academyId,
+  today,
+}: {
+  academyId: Id;
+  today: DateOnly;
+}) {
+  const month = monthOf(today);
+  const attendance = useQuery(
+    myAttendanceQueryOptions(academyId, {
+      from: firstOfMonth(month),
+      to: today,
+    })
+  );
+  if (!attendance.data) {
+    return <Skeleton className="h-[177px] flex-1 rounded-lg" />;
+  }
+  return (
+    <AttendanceTile
+      monthName={monthName(month)}
+      summary={summarizeAttendance(attendance.data)}
+    />
+  );
+}
+
+function ResultSection({
+  academyId,
+  viewerId,
+  today,
+}: {
+  academyId: Id;
+  viewerId: Id;
+  today: DateOnly;
+}) {
+  const results = useQuery(
+    studentRecordsQueryOptions(academyId, viewerId, {
+      recordType: "athletic",
+    })
+  );
+  const templates = useQuery(
+    recordTemplatesQueryOptions(academyId, "athletic")
+  );
+  if (!(results.data && templates.data)) {
+    return <Skeleton className="h-[177px] flex-1 rounded-lg" />;
+  }
+  // The result tile shows the first result type the student has results for.
+  const allSeries = resultSeries(templates.data);
+  const tileSeries =
+    allSeries.find((series) =>
+      results.data.some((r) => seriesResult(r, series) !== null)
+    ) ?? allSeries[0];
+  if (!tileSeries) {
+    return null;
+  }
+  return (
+    <ResultTile
+      label={tileSeries.label}
+      progress={drillProgress(results.data, tileSeries)}
+      today={today}
+    />
   );
 }

@@ -1,11 +1,20 @@
 /*
- * Log an athletic result (CO-8). Fixture-backed; see features/viewer/api.ts.
+ * Log an athletic result (CO-8). See the convention in features/viewer/api.ts; the
+ * fixture version is ./api.mock.ts (dev preview only).
  */
-import { fixtureDelay, teams } from "@/features/fixtures";
-import type { AthleticData, DrillId } from "@/features/results/templates";
-import { calendarEvents } from "@/features/sessions/fixtures";
-import { academyMembers } from "@/features/team-detail/fixtures";
+import {
+  type AthleticData,
+  buildResultData,
+  chipsFromServer,
+  type ResultTemplate,
+  type ServerRecordTemplate,
+} from "@/features/results/templates";
 import type { DateOnly, Id, StudentRecord } from "@/features/types";
+import { academyPath, apiAll, apiData } from "@/lib/api-client";
+import { isUiPreview } from "@/lib/preview";
+
+const mock =
+  import.meta.env.DEV && isUiPreview ? () => import("./api.mock") : null;
 
 export interface CoachStudent {
   id: Id;
@@ -26,156 +35,157 @@ export interface SessionOption {
   label: string;
 }
 
-/** Jean's free throws from 3P1-0, oldest first. */
-const history: (PastResult & { studentId: Id })[] = [
-  {
-    id: "res-jean-1",
-    studentId: "user-jean",
-    recordedOn: "2026-10-26",
-    data: { drill: "free_throws", made: 5, attempts: 10 },
-  },
-  {
-    id: "res-jean-2",
-    studentId: "user-jean",
-    recordedOn: "2026-11-02",
-    data: { drill: "free_throws", made: 6, attempts: 10 },
-  },
-  {
-    id: "res-jean-3",
-    studentId: "user-jean",
-    recordedOn: "2026-11-09",
-    data: { drill: "free_throws", made: 7, attempts: 10 },
-  },
-  {
-    id: "res-jean-4",
-    studentId: "user-jean",
-    recordedOn: "2026-11-16",
-    data: { drill: "free_throws", made: 6, attempts: 10 },
-  },
-];
+interface RosterMember {
+  name: string;
+  roles: string[];
+  userId: Id;
+}
 
-const SEED_DATES: DateOnly[] = ["2026-11-02", "2026-11-09", "2026-11-16"];
-const SEED_MADE = [4, 6, 5];
-const SEED_SECONDS = [44, 42, 43];
+interface ServerRecord {
+  data: Record<string, unknown>;
+  id: Id;
+  recordedOn: DateOnly;
+  status: "pending" | "verified" | "rejected";
+}
 
-/** Three past results for anyone else, so the chart is never empty in preview. */
-function seeded(studentId: Id, drill: DrillId): PastResult[] {
-  return SEED_DATES.map((recordedOn, index) => ({
-    id: `res-${studentId}-${drill}-${index}`,
-    recordedOn,
-    data:
-      drill === "dribbling"
-        ? { drill, seconds: SEED_SECONDS[index] ?? 45 }
-        : { drill, made: SEED_MADE[index] ?? 5, attempts: 10 },
-  }));
+interface ServerOccurrence {
+  cancelled: boolean;
+  id: Id;
+  teamId: Id | null;
+  title: string;
+}
+
+/**
+ * The templates the form offers: the server's athletic templates, one chip per metric.
+ * GET /record-templates?recordType=athletic&latest=true.
+ */
+export async function listResultTemplates(
+  academyId: Id
+): Promise<ResultTemplate[]> {
+  if (mock) {
+    return (await mock()).listResultTemplates(academyId);
+  }
+  const templates = await apiData<ServerRecordTemplate[]>(
+    academyPath(academyId, "/record-templates"),
+    { query: { recordType: "athletic", latest: true } }
+  );
+  return chipsFromServer(templates);
 }
 
 /**
  * Students on the coach's teams, for the student picker.
- * Real: organization.listTeamMembers for each team the coach is on.
+ * GET /teams/:teamId/members for each team the coach is on.
  */
 export async function listCoachStudents(
   academyId: Id,
-  params: { teamIds: Id[] }
+  params: { teams: { id: Id; name: string }[] }
 ): Promise<CoachStudent[]> {
-  await fixtureDelay();
-  return academyMembers
-    .filter((m) => m.academyId === academyId && m.roles.includes("student"))
-    .flatMap((m) => {
-      const teamId = m.teamIds.find((id) => params.teamIds.includes(id));
-      const team = teams.find((t) => t.id === teamId);
-      return team
-        ? [
-            {
-              id: m.userId,
-              name: m.user.name,
-              teamId: team.id,
-              teamName: team.name,
-            },
-          ]
-        : [];
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+  if (mock) {
+    return (await mock()).listCoachStudents(academyId, params);
+  }
+  const rosters = await Promise.all(
+    params.teams.map((team) =>
+      apiAll<RosterMember>(academyPath(academyId, `/teams/${team.id}/members`))
+    )
+  );
+  const seen = new Set<Id>();
+  const students: CoachStudent[] = [];
+  params.teams.forEach((team, index) => {
+    for (const m of rosters[index] ?? []) {
+      if (m.roles.includes("student") && !seen.has(m.userId)) {
+        seen.add(m.userId);
+        students.push({
+          id: m.userId,
+          name: m.name,
+          teamId: team.id,
+          teamName: team.name,
+        });
+      }
+    }
+  });
+  return students.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
- * A student's recent results for one drill, oldest first.
- * Real: GET /students/:studentId/records?recordType=athletic (filtered by data.drill).
+ * A student's recent results for one template, oldest first (rejected ones left out).
+ * GET /students/:studentId/records?recordType=athletic&template=<key>.
  */
 export async function listRecentResults(
-  _academyId: Id,
-  params: { studentId: Id; drill: DrillId }
+  academyId: Id,
+  params: { studentId: Id; template: ResultTemplate }
 ): Promise<PastResult[]> {
-  await fixtureDelay();
-  const own = history.filter(
-    (r) => r.studentId === params.studentId && r.data.drill === params.drill
+  if (mock) {
+    return (await mock()).listRecentResults(academyId, params);
+  }
+  const { template } = params;
+  if (!template.key) {
+    return [];
+  }
+  const records = await apiAll<ServerRecord>(
+    academyPath(academyId, `/students/${params.studentId}/records`),
+    {
+      query: { recordType: "athletic", template: template.key },
+      maxItems: 50,
+    }
   );
-  const list = own.length ? own : seeded(params.studentId, params.drill);
-  return [...list].sort((a, b) => a.recordedOn.localeCompare(b.recordedOn));
+  return records
+    .filter(
+      (r) =>
+        r.status !== "rejected" && typeof r.data[template.field] === "number"
+    )
+    .map((r) => ({ id: r.id, recordedOn: r.recordedOn, data: r.data }))
+    .sort((a, b) => a.recordedOn.localeCompare(b.recordedOn));
 }
 
 /**
  * Sessions of the student's team on a date, for the "Session" field.
- * Real: GET /events?from=date&to=date&teamId=.
+ * GET /events?from=date&to=date&teamId=.
  */
 export async function listSessionOptions(
   academyId: Id,
-  params: { teamId: Id; date: DateOnly }
+  params: { teamId: Id; teamName: string; date: DateOnly }
 ): Promise<SessionOption[]> {
-  await fixtureDelay();
-  const team = teams.find((t) => t.id === params.teamId);
-  return calendarEvents
-    .filter(
-      (e) =>
-        e.academyId === academyId &&
-        e.teamId === params.teamId &&
-        e.startDate === params.date &&
-        !e.excludedDates.includes(params.date)
-    )
-    .map((e) => ({
-      eventId: e.id,
-      label: team ? `${team.name} ${e.title}` : e.title,
-    }));
+  if (mock) {
+    return (await mock()).listSessionOptions(academyId, params);
+  }
+  const events = await apiAll<ServerOccurrence>(
+    academyPath(academyId, "/events"),
+    { query: { from: params.date, to: params.date, teamId: params.teamId } }
+  );
+  return events
+    .filter((e) => e.teamId === params.teamId && !e.cancelled)
+    .map((e) => ({ eventId: e.id, label: `${params.teamName} ${e.title}` }));
 }
-
-let nextRecord = 1;
 
 /**
  * Save an athletic result; it waits for verification like any record.
- * Real: POST /students/:studentId/records { recordType: "athletic", recordedOn, data, schemaVersion }.
+ * POST /students/:studentId/records { recordType: "athletic", recordedOn, schemaVersion,
+ * data: { template, ...fields } }. The recorder is the session user. The server's
+ * templates have no field for the session, so `eventId` is not stored.
  */
 export async function createAthleticRecord(
   academyId: Id,
   input: {
     studentId: Id;
     recordedOn: DateOnly;
-    data: AthleticData & { sport: "basketball"; eventId?: Id };
-    recordedBy: Id;
+    template: ResultTemplate;
+    score: number;
+    eventId?: Id;
   }
 ): Promise<StudentRecord> {
-  await fixtureDelay();
-  const id = `record-new-${nextRecord}`;
-  nextRecord += 1;
-  const { sport: _sport, eventId: _eventId, ...data } = input.data;
-  history.push({
-    id,
-    studentId: input.studentId,
-    recordedOn: input.recordedOn,
-    data,
-  });
-  return {
-    id,
-    academyId,
-    studentId: input.studentId,
-    recordType: "athletic",
-    recordedBy: input.recordedBy,
-    recordedOn: input.recordedOn,
-    data: input.data,
-    schemaVersion: 1,
-    fileUrl: null,
-    status: "pending",
-    verifiedBy: null,
-    reviewNote: null,
-    createdAt: new Date().toISOString(),
-  };
+  if (mock) {
+    return (await mock()).createAthleticRecord(academyId, input);
+  }
+  return await apiData<StudentRecord>(
+    academyPath(academyId, `/students/${input.studentId}/records`),
+    {
+      method: "POST",
+      body: {
+        recordType: "athletic",
+        recordedOn: input.recordedOn,
+        schemaVersion: input.template.schemaVersion,
+        data: buildResultData(input.template, input.score),
+      },
+    }
+  );
 }

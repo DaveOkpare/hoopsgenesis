@@ -1,13 +1,14 @@
 import { Button } from "@hoops-genesis/ui/components/button";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
-
+import { toast } from "sonner";
 import { useStopImpersonating, useViewer } from "@/features/viewer/queries";
 import {
   getActiveMembership,
   primaryRole,
   roleLabel,
 } from "@/features/viewer/selectors";
+import { errorMessage } from "@/lib/api-client";
 import { formatTime } from "@/lib/format";
 
 function EyeIcon() {
@@ -41,6 +42,8 @@ export function ImpersonationBanner() {
     () =>
       stop.mutate(undefined, {
         onSuccess: () => navigate({ to: "/owner/users" }),
+        onError: (error) =>
+          toast.error(errorMessage(error, "Couldn’t stop viewing. Try again.")),
       }),
     [stop, navigate]
   );

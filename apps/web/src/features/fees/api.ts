@@ -1,34 +1,27 @@
 /*
- * Fees (AO-4, AO-5, AO-6). Mock implementations of the fee endpoints in
- * "API endpoints.md" (see the convention notes in features/viewer/api.ts).
- * Fees are append-only: a payment is recorded once and can only be voided, never
- * edited or deleted. Voided rows stay in GET /fees and drop out of totals and
- * GET /fees/outstanding.
+ * Fees (AO-4, AO-5, AO-6) against /api/v1/academies/:academyId/fees. Fees are
+ * append-only: a payment is recorded once and can only be voided, never edited or
+ * deleted. Voided rows stay in GET /fees and drop out of totals and GET /fees/outstanding.
+ * Preview mode uses ./api.mock.ts (see lib/preview.ts).
+ *
+ * Fee rows carry only the student's id, so names and teams come from the academy's
+ * member list and rosters (./student-directory.ts). The server names the people who
+ * recorded and voided a payment itself (`recordedBy` / `voidedBy: { id, name }`).
  */
-import { appendAuditEntry, mockNow } from "@/features/audit-log/api";
-import {
-  DEFAULT_FEE,
-  extraMembers,
-  extraStudents,
-  NOVEMBER_TOTALS,
-  pastFees,
-} from "@/features/fees/fixtures";
 import {
   addMonths,
   type PeriodKey,
   periodDueDate,
+  periodEnd,
   periodKeyOf,
   periodOf,
   periodStart,
 } from "@/features/fees/periods";
 import {
-  academies,
-  fixtureDelay,
-  fees as fixtureFees,
-  members as fixtureMembers,
-  teams as fixtureTeams,
-  users,
-} from "@/features/fixtures";
+  loadAcademy,
+  loadStudentDirectory,
+  type StudentDirectory,
+} from "@/features/fees/student-directory";
 import type {
   DateOnly,
   Fee,
@@ -39,7 +32,17 @@ import type {
   Team,
   Timestamp,
 } from "@/features/types";
-import { formatMoney } from "@/lib/format";
+import {
+  academyPath,
+  apiAll,
+  apiData,
+  apiRaw,
+  isApiError,
+} from "@/lib/api-client";
+import { appNow, isUiPreview } from "@/lib/preview";
+
+const mock =
+  import.meta.env.DEV && isUiPreview ? () => import("./api.mock") : null;
 
 /** A student as the fee screens show them (name, team, last payment). */
 export interface FeeStudent {
@@ -50,10 +53,7 @@ export interface FeeStudent {
   teamName: string | null;
 }
 
-/**
- * GET /fees row plus the names the table shows. The real response is `Fee`; the
- * names come from the academy's member list (Better Auth `listMembers`).
- */
+/** GET /fees row plus the names the table shows. */
 export interface PaymentRow extends Fee {
   recordedByName: string | null;
   student: FeeStudent;
@@ -87,324 +87,418 @@ export interface RecordPaymentInput {
   studentId: Id;
 }
 
-/** POST /fees answers 409 when the student already has a payment for that period. */
+/** POST /fees answers 409 `fee_period_exists` when the period is already paid. */
 export class DuplicatePaymentError extends Error {
   readonly existingFeeId: Id;
 
-  constructor(existingFeeId: Id) {
-    super("This student already has a payment for that period.");
+  constructor(existingFeeId: Id, options?: ErrorOptions) {
+    super("This student already has a payment for that period.", options);
     this.name = "DuplicatePaymentError";
     this.existingFeeId = existingFeeId;
   }
 }
 
-/** POST /fees/:id/void answers 409 when the fee is already voided. */
+/** POST /fees/:id/void answers 409 `already_voided`. */
 export class AlreadyVoidedError extends Error {
-  constructor() {
-    super("This payment is already voided.");
+  constructor(
+    message = "This payment is already voided.",
+    options?: ErrorOptions
+  ) {
+    super(message, options);
     this.name = "AlreadyVoidedError";
   }
 }
 
-const allUsers = [...users, ...extraStudents];
-const allMembers = [...fixtureMembers, ...extraMembers];
-
-let feeStore: Fee[] = [...fixtureFees, ...pastFees];
-
-/** Changes made in this session to the November totals (they aren't derived from the table). */
-const sessionTotals = { collected: 0, paidStudents: 0 };
-
-function academyTimezone(academyId: Id): string {
-  return academies.find((a) => a.id === academyId)?.timezone ?? "UTC";
+/** A fee as the server sends it (see server/api/v1/fees-core.ts `serializeFee`). */
+interface ServerFee {
+  academyId: Id;
+  amount: string;
+  createdAt: Timestamp;
+  currency: string;
+  description: string;
+  dueDate: DateOnly;
+  id: Id;
+  paidAt: Timestamp | null;
+  paymentMethod: string | null;
+  paymentReference: string | null;
+  periodEnd: DateOnly;
+  periodStart: DateOnly;
+  recordedBy: { id: Id; name: string } | null;
+  recordedById: Id | null;
+  studentId: Id;
+  voidedAt: Timestamp | null;
+  voidedBy: { id: Id; name: string } | null;
+  voidedById: Id | null;
+  voidReason: string | null;
 }
 
-function nameOf(userId: Id | null): string | null {
-  if (!userId) {
-    return null;
-  }
-  return allUsers.find((u) => u.id === userId)?.name ?? null;
+/** One GET /fees/outstanding row (server/api/v1/fees.ts). */
+interface ServerOutstanding {
+  currentFee: {
+    amount: string;
+    currency: string;
+    dueDate: DateOnly;
+  } | null;
+  daysOverdue: number | null;
+  lastPayment: { paidAt: Timestamp } | null;
+  overdueSince: DateOnly | null;
+  student: { id: Id; name: string };
+  teams: { id: Id; name: string }[];
 }
 
-function isPaid(fee: Fee): boolean {
-  return fee.paidAt !== null && fee.voidedAt === null;
+const PAYMENT_METHODS: readonly PaymentMethod[] = [
+  "cash",
+  "bank_transfer",
+  "mobile_money",
+];
+
+function toPaymentMethod(value: string | null): PaymentMethod | null {
+  return PAYMENT_METHODS.find((method) => method === value) ?? null;
 }
 
-function lastPaidFee(studentId: Id): Fee | null {
-  return (
-    feeStore
-      .filter((fee) => fee.studentId === studentId && isPaid(fee))
-      .sort((a, b) => b.periodStart.localeCompare(a.periodStart))[0] ?? null
-  );
-}
-
-function studentsOf(academyId: Id): FeeStudent[] {
-  return allMembers
-    .filter((m) => m.academyId === academyId && m.roles.includes("student"))
-    .map((m) => {
-      const teamId = m.teamIds[0] ?? null;
-      return {
-        id: m.userId,
-        name: m.user.name,
-        teamId,
-        teamName: fixtureTeams.find((t) => t.id === teamId)?.name ?? null,
-        lastPaidAt: lastPaidFee(m.userId)?.paidAt ?? null,
-      };
-    });
-}
-
-function studentOf(academyId: Id, studentId: Id): FeeStudent {
-  return (
-    studentsOf(academyId).find((s) => s.id === studentId) ?? {
-      id: studentId,
-      name: nameOf(studentId) ?? "Former student",
-      teamId: null,
-      teamName: null,
-      lastPaidAt: null,
-    }
-  );
-}
-
-function joinedAt(academyId: Id, studentId: Id): Timestamp | null {
-  return (
-    allMembers.find((m) => m.academyId === academyId && m.userId === studentId)
-      ?.createdAt ?? null
-  );
-}
-
-function toRow(academyId: Id, fee: Fee): PaymentRow {
+function toFee(row: ServerFee): Fee {
   return {
-    ...fee,
-    student: studentOf(academyId, fee.studentId),
-    recordedByName: nameOf(fee.recordedBy),
-    voidedByName: nameOf(fee.voidedBy),
+    id: row.id,
+    academyId: row.academyId,
+    studentId: row.studentId,
+    description: row.description,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd,
+    amount: row.amount,
+    currency: row.currency,
+    dueDate: row.dueDate,
+    paidAt: row.paidAt,
+    paymentMethod: toPaymentMethod(row.paymentMethod),
+    paymentReference: row.paymentReference,
+    createdAt: row.createdAt,
+    recordedBy: row.recordedById,
+    voidedAt: row.voidedAt,
+    voidedBy: row.voidedById,
+    voidReason: row.voidReason,
   };
 }
 
-function currentPeriod(academyId: Id): PeriodKey {
-  return periodOf(mockNow(), academyTimezone(academyId));
-}
+const isPaid = (fee: { paidAt: string | null; voidedAt: string | null }) =>
+  fee.paidAt !== null && fee.voidedAt === null;
 
-function outstandingFor(academyId: Id, period: PeriodKey): OutstandingRow[] {
-  const due = periodDueDate(period);
-  const rows: OutstandingRow[] = [];
-  for (const student of studentsOf(academyId)) {
-    const joined = joinedAt(academyId, student.id);
-    const owesThisPeriod = joined === null || joined.slice(0, 10) <= due;
-    const coversPeriod = feeStore.some(
-      (fee) =>
-        fee.studentId === student.id &&
-        isPaid(fee) &&
-        fee.periodStart === periodStart(period)
-    );
-    if (!owesThisPeriod || coversPeriod) {
+/** Newest paid (not voided) payment per student, by period. */
+function lastPaidByStudent(fees: readonly ServerFee[]): Map<Id, Timestamp> {
+  const best = new Map<Id, ServerFee>();
+  for (const fee of fees) {
+    if (!isPaid(fee)) {
       continue;
     }
-    const last = lastPaidFee(student.id);
-    const firstUnpaid =
-      last && periodKeyOf(last.periodStart) < period
-        ? addMonths(periodKeyOf(last.periodStart), 1)
-        : period;
-    let months = 1;
-    while (addMonths(firstUnpaid, months - 1) < period) {
-      months += 1;
+    const current = best.get(fee.studentId);
+    if (!current || fee.periodStart > current.periodStart) {
+      best.set(fee.studentId, fee);
     }
-    rows.push({
-      studentId: student.id,
-      teamId: student.teamId,
-      amount: (Number(DEFAULT_FEE.amount) * months).toFixed(2),
-      currency: DEFAULT_FEE.currency,
-      dueDate: periodDueDate(firstUnpaid),
-      lastPaidAt: last?.paidAt ?? null,
-      student,
-    });
   }
-  return rows;
+  return new Map(
+    [...best].map(([id, fee]) => [id, fee.paidAt ?? fee.createdAt])
+  );
+}
+
+function studentFrom(
+  directory: StudentDirectory,
+  id: Id,
+  lastPaid: Map<Id, Timestamp>,
+  fallbackName?: string
+): FeeStudent {
+  const person = directory.people.get(id);
+  return {
+    id,
+    name: person?.name ?? fallbackName ?? "Former student",
+    teamId: person?.teamId ?? null,
+    teamName: person?.teamName ?? null,
+    lastPaidAt: lastPaid.get(id) ?? null,
+  };
+}
+
+const listAllFees = (
+  academyId: Id,
+  query: Record<string, string | undefined> = {}
+) => apiAll<ServerFee>(academyPath(academyId, "/fees"), { query });
+
+async function timeZoneOf(academyId: Id): Promise<string> {
+  return (await loadAcademy(academyId))?.timezone ?? "UTC";
 }
 
 /**
- * Real: `GET /api/v1/academies/:academyId/fees?from=&to=` (by period), newest first.
- * `period` null returns every period.
+ * `GET /fees?from=&to=` (periods overlapping the month; `period` null = every period),
+ * newest payment first.
  */
 export async function listFees(
   academyId: Id,
   params: { period: PeriodKey | null }
 ): Promise<PaymentRow[]> {
-  await fixtureDelay();
-  const start = params.period ? periodStart(params.period) : null;
-  return feeStore
-    .filter((fee) => fee.academyId === academyId)
-    .filter((fee) => start === null || fee.periodStart === start)
+  if (mock) {
+    return (await mock()).listFees(academyId, params);
+  }
+  const range = params.period
+    ? { from: periodStart(params.period), to: periodEnd(params.period) }
+    : {};
+  const [rows, everyFee, directory] = await Promise.all([
+    listAllFees(academyId, range),
+    params.period ? listAllFees(academyId) : Promise.resolve(null),
+    loadStudentDirectory(academyId),
+  ]);
+  const lastPaid = lastPaidByStudent(everyFee ?? rows);
+  return rows
+    .map(
+      (row): PaymentRow => ({
+        ...toFee(row),
+        student: studentFrom(directory, row.studentId, lastPaid),
+        recordedByName: row.recordedBy?.name ?? null,
+        voidedByName: row.voidedBy?.name ?? null,
+      })
+    )
     .sort((a, b) =>
       (b.paidAt ?? b.createdAt)
-        .slice(0, 10)
-        .localeCompare((a.paidAt ?? a.createdAt).slice(0, 10))
-    )
-    .map((fee) => toRow(academyId, fee));
+        .slice(0, "YYYY-MM-DD".length)
+        .localeCompare((a.paidAt ?? a.createdAt).slice(0, "YYYY-MM-DD".length))
+    );
 }
 
-/** Real: `GET /api/v1/academies/:academyId/fees/outstanding?teamId=&on=` (on defaults to today). */
+/** Most common amount among recent payments: the academy's usual monthly fee. */
+function usualFee(fees: readonly ServerFee[]): Money | null {
+  const recent = fees
+    .filter(isPaid)
+    .sort((a, b) => b.periodStart.localeCompare(a.periodStart))
+    .slice(0, 50);
+  const counts = new Map<string, { money: Money; count: number }>();
+  for (const fee of recent) {
+    const key = `${fee.amount} ${fee.currency}`;
+    const entry = counts.get(key) ?? {
+      money: { amount: fee.amount, currency: fee.currency },
+      count: 0,
+    };
+    entry.count += 1;
+    counts.set(key, entry);
+  }
+  return (
+    [...counts.values()].sort((a, b) => b.count - a.count)[0]?.money ?? null
+  );
+}
+
+function monthsOwed(since: DateOnly | null, current: PeriodKey): number {
+  if (!since) {
+    return 1;
+  }
+  let months = 1;
+  const first = periodKeyOf(since);
+  while (addMonths(first, months - 1) < current) {
+    months += 1;
+  }
+  return months;
+}
+
+/**
+ * `GET /fees/outstanding?teamId=` (on = today): students with no paid fee covering
+ * today. The server has no amount for students who were never billed; the amount shown
+ * is their billed fee when there is one, else the usual fee per month owed.
+ */
 export async function listOutstandingFees(
   academyId: Id,
   params: { teamId: Id | null }
 ): Promise<OutstandingRow[]> {
-  await fixtureDelay();
-  return outstandingFor(academyId, currentPeriod(academyId)).filter(
-    (row) => !params.teamId || row.teamId === params.teamId
-  );
+  if (mock) {
+    return (await mock()).listOutstandingFees(academyId, params);
+  }
+  const [rows, fees, directory, timeZone] = await Promise.all([
+    apiAll<ServerOutstanding>(academyPath(academyId, "/fees/outstanding"), {
+      query: { teamId: params.teamId },
+    }),
+    listAllFees(academyId),
+    loadStudentDirectory(academyId),
+    timeZoneOf(academyId),
+  ]);
+  const usual = usualFee(fees);
+  const current = periodOf(appNow(), timeZone);
+  const lastPaid = lastPaidByStudent(fees);
+  return rows.map((row) => {
+    const months = monthsOwed(row.overdueSince, current);
+    const amount =
+      row.currentFee?.amount ??
+      (usual ? (Number(usual.amount) * months).toFixed(2) : "0.00");
+    const team = row.teams[0] ?? null;
+    return {
+      studentId: row.student.id,
+      teamId: team?.id ?? null,
+      amount,
+      currency: row.currentFee?.currency ?? usual?.currency ?? "",
+      dueDate:
+        row.currentFee?.dueDate ?? row.overdueSince ?? periodDueDate(current),
+      lastPaidAt: row.lastPayment?.paidAt ?? null,
+      student: {
+        ...studentFrom(directory, row.student.id, lastPaid, row.student.name),
+        name: row.student.name,
+        teamId: team?.id ?? null,
+        teamName: team?.name ?? null,
+      },
+    };
+  });
 }
 
 /**
- * This month's totals for the summary cards. Real: the outstanding part comes from
- * `GET /dashboard` (outstanding fees); "collected" and the online/cash split need a
- * totals field on `GET /fees` or the dashboard (not in the API doc yet).
+ * This month's totals for the summary cards, derived from `GET /fees` for the month and
+ * `GET /fees/outstanding` (the API has no totals endpoint). "Online" = mobile money.
  */
 export async function getFeeSummary(academyId: Id): Promise<FeeSummary> {
-  await fixtureDelay();
-  const period = currentPeriod(academyId);
-  const outstanding = outstandingFor(academyId, period);
-  const outstandingTotal = outstanding.reduce(
-    (sum, row) => sum + Number(row.amount),
-    0
+  if (mock) {
+    return (await mock()).getFeeSummary(academyId);
+  }
+  const timeZone = await timeZoneOf(academyId);
+  const period = periodOf(appNow(), timeZone);
+  const [monthFees, outstanding] = await Promise.all([
+    listAllFees(academyId, {
+      from: periodStart(period),
+      to: periodEnd(period),
+    }),
+    listOutstandingFees(academyId, { teamId: null }),
+  ]);
+  const paid = monthFees.filter(
+    (fee) => isPaid(fee) && fee.periodStart === periodStart(period)
   );
+  const currency =
+    paid[0]?.currency ??
+    outstanding[0]?.currency ??
+    (await loadAcademy(academyId))?.defaultCurrency ??
+    "";
+  const sum = (amounts: string[]) =>
+    amounts.reduce((total, amount) => total + Number(amount), 0).toFixed(2);
+  const online = paid.filter((fee) => fee.paymentMethod === "mobile_money");
   return {
     period,
-    collected: {
-      amount: (
-        Number(NOVEMBER_TOTALS.collected) + sessionTotals.collected
-      ).toFixed(2),
-      currency: DEFAULT_FEE.currency,
-    },
-    paidStudentCount:
-      NOVEMBER_TOTALS.paidStudentCount + sessionTotals.paidStudents,
+    collected: { amount: sum(paid.map((fee) => fee.amount)), currency },
+    paidStudentCount: new Set(paid.map((fee) => fee.studentId)).size,
     outstanding: {
-      amount: outstandingTotal.toFixed(2),
-      currency: DEFAULT_FEE.currency,
+      amount: sum(outstanding.map((row) => row.amount)),
+      currency,
     },
     unpaidStudentCount: outstanding.length,
-    onlineShare: NOVEMBER_TOTALS.onlineShare,
+    onlineShare: paid.length === 0 ? 0 : online.length / paid.length,
   };
 }
 
-/** Students and teams for the pickers. Real: Better Auth `listMembers` + `listTeams`. */
+/** Students for the pickers: members with the student role, with team and last payment. */
 export async function listFeeStudents(academyId: Id): Promise<FeeStudent[]> {
-  await fixtureDelay();
-  return studentsOf(academyId).sort((a, b) => a.name.localeCompare(b.name));
+  if (mock) {
+    return (await mock()).listFeeStudents(academyId);
+  }
+  const [directory, fees] = await Promise.all([
+    loadStudentDirectory(academyId),
+    listAllFees(academyId),
+  ]);
+  const lastPaid = lastPaidByStudent(fees);
+  return [...directory.people.values()]
+    .filter((person) => person.roles.includes("student"))
+    .map((person) => studentFrom(directory, person.id, lastPaid))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function listFeeTeams(academyId: Id): Promise<Team[]> {
-  await fixtureDelay();
-  return fixtureTeams.filter((t) => t.academyId === academyId);
-}
-
-/** The academy's usual fee, used to pre-fill "Amount". */
-export async function getDefaultFee(_academyId: Id): Promise<Money> {
-  await fixtureDelay();
-  return { ...DEFAULT_FEE };
+  if (mock) {
+    return (await mock()).listFeeTeams(academyId);
+  }
+  const directory = await loadStudentDirectory(academyId);
+  return directory.teams.map((team) => ({
+    id: team.id,
+    academyId,
+    name: team.name,
+    ageGroup: team.ageGroup,
+    createdAt: "",
+  }));
 }
 
 /**
- * Real: `POST /api/v1/academies/:academyId/fees` with an `Idempotency-Key` header.
- * Same student + period → 409 (DuplicatePaymentError). `recordedBy` comes from the
- * session on the server; the mock takes it as `actorId`.
+ * The academy's usual fee, used to pre-fill "Amount". There is no fee setting on the
+ * server, so it is the most common amount among recent payments (empty when the
+ * academy has none yet), in the academy's default currency.
+ */
+export async function getDefaultFee(academyId: Id): Promise<Money> {
+  if (mock) {
+    return (await mock()).getDefaultFee(academyId);
+  }
+  const usual = usualFee(await listAllFees(academyId));
+  if (usual) {
+    return usual;
+  }
+  const academy = await loadAcademy(academyId);
+  return { amount: "", currency: academy?.defaultCurrency ?? "" };
+}
+
+/**
+ * `POST /fees` with an `Idempotency-Key` (one per "Save payment" action, reused if the
+ * same action is retried). Same student + period → 409 `fee_period_exists`
+ * (DuplicatePaymentError). The server takes `recordedBy` from the session.
  */
 export async function recordPayment(
   academyId: Id,
   input: RecordPaymentInput,
-  actorId: Id
+  idempotencyKey: string
 ): Promise<Fee> {
-  await fixtureDelay();
-  const existing = feeStore.find(
-    (other) =>
-      other.studentId === input.studentId &&
-      other.periodStart === input.periodStart &&
-      isPaid(other)
-  );
-  if (existing) {
-    throw new DuplicatePaymentError(existing.id);
+  if (mock) {
+    return (await mock()).recordPayment(academyId, input, idempotencyKey);
   }
-  const fee: Fee = {
-    id: `fee-${crypto.randomUUID()}`,
-    academyId,
-    studentId: input.studentId,
-    description: input.description,
-    periodStart: input.periodStart,
-    periodEnd: input.periodEnd,
-    amount: Number(input.amount).toFixed(2),
-    currency: input.currency,
-    dueDate: periodDueDate(periodKeyOf(input.periodStart)),
-    paidAt: input.paidAt,
-    paymentMethod: input.paymentMethod,
-    paymentReference: input.paymentReference,
-    createdAt: mockNow().toISOString(),
-    recordedBy: actorId,
-    voidedAt: null,
-    voidedBy: null,
-    voidReason: null,
-  };
-  feeStore = [fee, ...feeStore];
-  if (periodKeyOf(fee.periodStart) === currentPeriod(academyId)) {
-    sessionTotals.collected += Number(fee.amount);
-    sessionTotals.paidStudents += 1;
+  try {
+    const row = await apiData<ServerFee>(academyPath(academyId, "/fees"), {
+      method: "POST",
+      idempotencyKey,
+      body: {
+        studentId: input.studentId,
+        description: input.description,
+        periodStart: input.periodStart,
+        periodEnd: input.periodEnd,
+        dueDate: periodDueDate(periodKeyOf(input.periodStart)),
+        amount: input.amount,
+        currency: input.currency,
+        paidAt: input.paidAt,
+        paymentMethod: input.paymentMethod,
+        ...(input.paymentReference
+          ? { paymentReference: input.paymentReference }
+          : {}),
+      },
+    });
+    return toFee(row);
+  } catch (error) {
+    if (isApiError(error, "fee_period_exists")) {
+      const details = error.details as { feeId?: string } | undefined;
+      throw new DuplicatePaymentError(details?.feeId ?? "", { cause: error });
+    }
+    throw error;
   }
-  return fee;
 }
 
-/**
- * Real: `POST /api/v1/academies/:academyId/fees/:id/void` with `{ reason }`. Sets
- * voidedAt / voidedBy / voidReason and writes audit_log in one transaction.
- */
+/** `POST /fees/:id/void` with `{ reason }`; the server writes the audit row. */
 export async function voidFee(
   academyId: Id,
   feeId: Id,
-  input: { reason: string },
-  actorId: Id
+  input: { reason: string }
 ): Promise<Fee> {
-  await fixtureDelay();
-  const fee = feeStore.find((f) => f.id === feeId && f.academyId === academyId);
-  if (!fee) {
-    throw new Error("Payment not found.");
+  if (mock) {
+    return (await mock()).voidFee(academyId, feeId, input);
   }
-  if (fee.voidedAt) {
-    throw new AlreadyVoidedError();
+  try {
+    const body = await apiRaw<{ data: ServerFee }>(
+      academyPath(academyId, `/fees/${encodeURIComponent(feeId)}/void`),
+      { method: "POST", body: { reason: input.reason } }
+    );
+    return toFee(body.data);
+  } catch (error) {
+    if (isApiError(error, "already_voided")) {
+      throw new AlreadyVoidedError(undefined, { cause: error });
+    }
+    throw error;
   }
-  const now = mockNow();
-  const voided: Fee = {
-    ...fee,
-    voidedAt: now.toISOString(),
-    voidedBy: actorId,
-    voidReason: input.reason,
-  };
-  feeStore = feeStore.map((f) => (f.id === feeId ? voided : f));
-  if (periodKeyOf(fee.periodStart) === currentPeriod(academyId)) {
-    sessionTotals.collected -= Number(fee.amount);
-    sessionTotals.paidStudents -= 1;
-  }
-  const stamp = (value: string | null) =>
-    value ? value.replace("T", " ").slice(0, 16) : null;
-  appendAuditEntry({
-    academyId,
-    actorId,
-    action: "fee.void",
-    entityType: "fee",
-    entityId: fee.id,
-    before: {
-      amount: `${fee.amount} ${fee.currency}`,
-      paid_at: fee.paidAt?.slice(0, 10) ?? null,
-      voided_at: null,
-    },
-    after: {
-      amount: `${fee.amount} ${fee.currency}`,
-      paid_at: fee.paidAt?.slice(0, 10) ?? null,
-      voided_at: stamp(voided.voidedAt),
-    },
-    reason: input.reason,
-    subject: { id: fee.studentId, name: nameOf(fee.studentId) ?? "Student" },
-    summary: formatMoney({ amount: fee.amount, currency: fee.currency }),
-  });
-  return voided;
 }
 
-/** The current time; fixture time in mock mode. */
-export function feesNow(): Date {
-  return mockNow();
+/** Students who haven't paid for today, for the sidebar badge (`GET /fees/outstanding`). */
+export async function countOutstandingFees(academyId: Id): Promise<number> {
+  if (mock) {
+    return (await mock()).countOutstandingFees(academyId);
+  }
+  const rows = await apiAll<ServerOutstanding>(
+    academyPath(academyId, "/fees/outstanding")
+  );
+  return rows.length;
 }

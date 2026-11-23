@@ -6,10 +6,13 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useRef } from "react";
 
 import { auditLogKeys } from "@/features/audit-log/queries";
 import {
-  feesNow,
+  AlreadyVoidedError,
+  countOutstandingFees,
+  DuplicatePaymentError,
   getDefaultFee,
   getFeeSummary,
   listFeeStudents,
@@ -21,7 +24,10 @@ import {
   voidFee,
 } from "@/features/fees/api";
 import type { PeriodKey } from "@/features/fees/periods";
+import { forgetStudentDirectory } from "@/features/fees/student-directory";
 import type { Id } from "@/features/types";
+import { newIdempotencyKey } from "@/lib/api-client";
+import { appNow } from "@/lib/preview";
 
 export type {
   FeeStudent,
@@ -30,8 +36,16 @@ export type {
   PaymentRow,
   RecordPaymentInput,
 } from "@/features/fees/api";
-// biome-ignore lint/performance/noBarrelFile: error classes are part of this feature's query API.
-export { DuplicatePaymentError } from "@/features/fees/api";
+
+/** 409: the student already has a payment for that period. */
+export function isDuplicatePayment(error: unknown): boolean {
+  return error instanceof DuplicatePaymentError;
+}
+
+/** 409: the payment was voided already (by someone else, or a second click). */
+export function isAlreadyVoided(error: unknown): boolean {
+  return error instanceof AlreadyVoidedError;
+}
 
 export const feeKeys = {
   all: (academyId: Id) => ["academies", academyId, "fees"] as const,
@@ -44,7 +58,17 @@ export const feeKeys = {
   teams: (academyId: Id) => [...feeKeys.all(academyId), "teams"] as const,
   defaultFee: (academyId: Id) =>
     [...feeKeys.all(academyId), "default-fee"] as const,
+  outstandingCount: (academyId: Id) =>
+    [...feeKeys.all(academyId), "outstanding-count"] as const,
 };
+
+/** How many students haven't paid for today (sidebar badge). */
+export function outstandingCountQueryOptions(academyId: Id) {
+  return queryOptions({
+    queryKey: feeKeys.outstandingCount(academyId),
+    queryFn: () => countOutstandingFees(academyId),
+  });
+}
 
 export function feesQueryOptions(academyId: Id, period: PeriodKey | null) {
   return queryOptions({
@@ -93,25 +117,39 @@ export function defaultFeeQueryOptions(academyId: Id) {
   });
 }
 
-/** Record a cash or transfer payment; every fee list and total refreshes. */
-export function useRecordPayment(academyId: Id, actorId: Id) {
+/**
+ * Record a cash or transfer payment; every fee list and total refreshes. One
+ * Idempotency-Key per payment: a retry of the same values (after a network error)
+ * reuses it, so the server never records the payment twice; new values get a new key.
+ * A 409 for the period refreshes the lists so the dialog's duplicate notice shows.
+ */
+export function useRecordPayment(academyId: Id) {
   const queryClient = useQueryClient();
+  const attempt = useRef<{ signature: string; key: string } | null>(null);
   return useMutation({
-    mutationFn: (input: RecordPaymentInput) =>
-      recordPayment(academyId, input, actorId),
-    onSuccess: async () => {
+    mutationFn: (input: RecordPaymentInput) => {
+      const signature = JSON.stringify(input);
+      if (attempt.current?.signature !== signature) {
+        attempt.current = { signature, key: newIdempotencyKey() };
+      }
+      return recordPayment(academyId, input, attempt.current.key);
+    },
+    onSuccess: () => {
+      attempt.current = null;
+    },
+    onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: feeKeys.all(academyId) });
     },
   });
 }
 
 /** Void a payment with a reason; it stays listed as voided and the activity log gains a row. */
-export function useVoidFee(academyId: Id, actorId: Id) {
+export function useVoidFee(academyId: Id) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ feeId, reason }: { feeId: Id; reason: string }) =>
-      voidFee(academyId, feeId, { reason }, actorId),
-    onSuccess: async () => {
+      voidFee(academyId, feeId, { reason }),
+    onSettled: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: feeKeys.all(academyId) }),
         queryClient.invalidateQueries({
@@ -122,7 +160,12 @@ export function useVoidFee(academyId: Id, actorId: Id) {
   });
 }
 
-/** The current time for "days overdue" and "Today"; fixture time in mock mode. */
+/** The current time for "days overdue" and "Today"; fixture time in preview. */
 export function currentTime(): Date {
-  return feesNow();
+  return appNow();
+}
+
+/** Forget cached names and teams (after roster changes elsewhere). */
+export function refreshFeeDirectory(academyId: Id): void {
+  forgetStudentDirectory(academyId);
 }

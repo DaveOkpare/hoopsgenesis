@@ -1,32 +1,17 @@
 /*
  * Sessions: one day of a calendar event that takes attendance, with its roster and
- * check-ins (CO-1, CO-3, CO-4, CO-5, CO-6, CO-7). Fixture-backed; see the convention
- * in features/viewer/api.ts. Each function names the endpoint(s) it stands in for.
+ * check-ins (CO-1, CO-3, CO-4, CO-5, CO-6, CO-7). See the convention in
+ * features/viewer/api.ts; the fixture version is ./api.mock.ts (dev preview only).
  *
- * Fixture-only argument: `asOf` is the session clock (clock.ts). The real API answers
- * "as of now" on the server and stamps times itself, so `asOf` disappears with the swap.
+ * A session is not stored on the server: it is an event on one of its dates. Its
+ * roster is the event team's students (GET /teams/:teamId/members), its rows come from
+ * GET /attendance?eventId=&date=, and its check-in window from
+ * GET /events/:id/sessions (checkInOpensAt / checkInClosesAt).
+ *
+ * `asOf` is the clock the status ("upcoming" / "open" / "closed") is worked out at:
+ * the real time in production, the designs' morning in preview (clock.ts).
  */
-import { academies, fixtureDelay, teams } from "@/features/fixtures";
-import {
-  attendanceRows,
-  avatarTints,
-  calendarEvents,
-  TINT_CYCLE,
-} from "@/features/sessions/fixtures";
-import {
-  addMinutes,
-  daysBetween,
-  localDate,
-  WINDOW_CLOSES_AFTER_MIN,
-  WINDOW_OPENS_BEFORE_MIN,
-  zonedInstant,
-} from "@/features/sessions/time";
-import {
-  academyMembers,
-  outstandingFees,
-} from "@/features/team-detail/fixtures";
 import type {
-  AttendanceRecord,
   AttendanceStatus,
   CalendarEvent,
   DateOnly,
@@ -34,8 +19,55 @@ import type {
   Team,
   Timestamp,
 } from "@/features/types";
+import {
+  academyPath,
+  apiAll,
+  apiData,
+  apiRaw,
+  isApiError,
+} from "@/lib/api-client";
+import { isUiPreview } from "@/lib/preview";
+
+import { tintFor } from "./model";
+import {
+  addDays,
+  addMinutes,
+  localDate,
+  WINDOW_CLOSES_AFTER_MIN,
+  WINDOW_OPENS_BEFORE_MIN,
+  zonedInstant,
+} from "./time";
+
+const mock =
+  import.meta.env.DEV && isUiPreview ? () => import("./api.mock") : null;
 
 export type SessionStatus = "upcoming" | "open" | "closed" | "cancelled";
+
+export interface PersonRef {
+  id: Id;
+  name: string;
+}
+
+/** One attendance row as GET /attendance returns it (voided rows are left out here). */
+export interface SessionAttendance {
+  academyId: Id;
+  checkInAt: Timestamp | null;
+  checkInDistanceM: number | null;
+  checkOutAt: Timestamp | null;
+  checkOutDistanceM: number | null;
+  eventId: Id;
+  id: Id;
+  notes: string | null;
+  recordedBy: PersonRef | null;
+  recordedById: Id;
+  sessionDate: DateOnly;
+  status: AttendanceStatus;
+  studentId: Id;
+  verifiedAt: Timestamp | null;
+  verifiedBy: PersonRef | null;
+  verifiedById: Id | null;
+  voidedAt: Timestamp | null;
+}
 
 export interface SessionStudent {
   /** Days the student's fee is overdue (GET /fees/outstanding), for the "FEES 18D" tag. */
@@ -48,13 +80,16 @@ export interface SessionStudent {
 }
 
 export interface SessionEntry {
-  attendance: AttendanceRecord | null;
+  attendance: SessionAttendance | null;
   student: SessionStudent;
 }
 
 export interface Session {
   academyName: string;
-  /** "Reason (students see this)" when the session was cancelled. */
+  /**
+   * "Reason (students see this)" when the session was cancelled. The server keeps the
+   * reason only in the audit log, which coaches cannot read, so it is null in real mode.
+   */
   cancelReason: string | null;
   /** Check-in closes 60 min after the end. */
   closesAt: Timestamp;
@@ -79,65 +114,138 @@ export interface AttendanceEntryInput {
   studentId: Id;
 }
 
+/** Who the session screens need to know about the academy. */
+export interface SessionAcademy {
+  id: Id;
+  name: string;
+  timezone: string;
+}
+
+// ---------------------------------------------------------------- server shapes
+
+interface ServerEvent {
+  academyId: Id;
+  collectAttendance: boolean;
+  createdAt: Timestamp;
+  createdById: Id;
+  description: string | null;
+  endDate: DateOnly | null;
+  endTime: string | null;
+  eventType: string;
+  excludedDates: DateOnly[];
+  id: Id;
+  location: string | null;
+  startDate: DateOnly;
+  startTime: string | null;
+  teamId: Id | null;
+  title: string;
+  updatedAt: Timestamp;
+}
+
+interface ServerSessionFields {
+  cancelled: boolean;
+  checkInClosesAt: Timestamp | null;
+  checkInOpensAt: Timestamp | null;
+  endsAt: Timestamp | null;
+  sessionDate: DateOnly;
+  startsAt: Timestamp | null;
+}
+
+/** GET /events items: the event with one session's fields. */
+type ServerOccurrence = ServerEvent & ServerSessionFields;
+
+interface RosterMember {
+  image: string | null;
+  name: string;
+  roles: string[];
+  userId: Id;
+}
+
+interface ServerAttendance extends SessionAttendance {
+  student: { id: Id; name: string; image: string | null } | null;
+}
+
+interface OutstandingRow {
+  daysOverdue?: number | null;
+  student: { id: Id };
+}
+
+interface TeamRow {
+  id: Id;
+  name: string;
+}
+
 const DAYS_PER_WEEK = 7;
+/** GET /events accepts at most 92 days; a series is looked up 12 weeks ahead. */
+const SERIES_LOOKAHEAD_DAYS = 84;
 
-/** When each fixture row was written (the API row has no created_at). */
-const rowCreatedAt = new Map<Id, Timestamp>(
-  attendanceRows.map((r) => [r.id, r.checkInAt ?? "2026-11-23T00:00:00Z"])
-);
-
-/** "Reason (students see this)" per cancelled session; the API stores it with the cancel. */
-const cancelReasons = new Map<string, string>();
-
-function academyOf(academyId: Id) {
-  const academy = academies.find((a) => a.id === academyId);
-  if (!academy) {
-    throw new Error(`Academy ${academyId} not found`);
-  }
-  return academy;
+export function toCalendarEvent(event: ServerEvent): CalendarEvent {
+  return {
+    id: event.id,
+    academyId: event.academyId,
+    teamId: event.teamId,
+    eventType: event.eventType,
+    title: event.title,
+    description: event.description,
+    location: event.location,
+    startDate: event.startDate,
+    endDate: event.endDate,
+    startTime: event.startTime,
+    endTime: event.endTime,
+    excludedDates: event.excludedDates,
+    collectAttendance: event.collectAttendance,
+    createdBy: event.createdById,
+    createdAt: event.createdAt,
+    updatedAt: event.updatedAt,
+  };
 }
 
-function tintFor(studentId: Id): string {
-  const known = avatarTints[studentId];
-  if (known) {
-    return known;
-  }
-  let hash = 0;
-  for (const char of studentId) {
-    hash = (hash + char.charCodeAt(0)) % TINT_CYCLE.length;
-  }
-  return TINT_CYCLE[hash] ?? TINT_CYCLE[0];
+// ---------------------------------------------------------------- loaders
+
+async function loadTeams(academyId: Id): Promise<Map<Id, string>> {
+  const rows = await apiAll<TeamRow>(academyPath(academyId, "/teams"));
+  return new Map(rows.map((t) => [t.id, t.name]));
 }
 
-function overdueDays(studentId: Id, today: DateOnly): number | null {
-  const owed = outstandingFees.find((f) => f.studentId === studentId);
-  if (!owed) {
-    return null;
-  }
-  const days = daysBetween(owed.dueDate, today);
-  return days > 0 ? days : null;
+async function loadRoster(academyId: Id, teamId: Id): Promise<RosterMember[]> {
+  const members = await apiAll<RosterMember>(
+    academyPath(academyId, `/teams/${teamId}/members`)
+  );
+  return members.filter((m) => m.roles.includes("student"));
 }
 
-/** The row as it stood at `asOf`: later check-ins hidden, later ticks undone. */
-function rowAsOf(r: AttendanceRecord, asOf: Date): AttendanceRecord | null {
-  const created = rowCreatedAt.get(r.id);
-  if (r.voidedAt || (created && new Date(created) > asOf)) {
-    return null;
+/** Days overdue per student; an empty map when the caller may not read fees. */
+async function loadOverdue(
+  academyId: Id,
+  teamId: Id | null
+): Promise<Map<Id, number>> {
+  try {
+    const rows = await apiAll<OutstandingRow>(
+      academyPath(academyId, "/fees/outstanding"),
+      { query: { teamId } }
+    );
+    const result = new Map<Id, number>();
+    for (const row of rows) {
+      if (row.daysOverdue && row.daysOverdue > 0) {
+        result.set(row.student.id, row.daysOverdue);
+      }
+    }
+    return result;
+  } catch (error) {
+    if (isApiError(error) && error.status === 403) {
+      return new Map();
+    }
+    throw error;
   }
-  if (r.verifiedAt && new Date(r.verifiedAt) > asOf) {
-    return { ...r, verifiedAt: null, verifiedBy: null };
-  }
-  return r;
 }
 
 function sessionStatus(
-  event: CalendarEvent,
-  date: DateOnly,
+  cancelled: boolean,
   opensAt: Date,
   closesAt: Date,
   asOf: Date
 ): SessionStatus {
-  if (event.excludedDates.includes(date)) {
+  if (cancelled) {
     return "cancelled";
   }
   if (asOf < opensAt) {
@@ -146,121 +254,254 @@ function sessionStatus(
   return asOf <= closesAt ? "open" : "closed";
 }
 
-/** Later weekly copies of the same event (bulk-created series share title, team and time). */
-function seriesDatesFrom(event: CalendarEvent, date: DateOnly): DateOnly[] {
-  return calendarEvents
-    .filter(
-      (e) =>
-        e.title === event.title &&
-        e.teamId === event.teamId &&
-        e.startTime === event.startTime &&
-        e.startDate >= date &&
-        daysBetween(date, e.startDate) % DAYS_PER_WEEK === 0 &&
-        !e.excludedDates.includes(e.startDate)
-    )
-    .map((e) => e.startDate)
-    .sort();
+/** The check-in window: the server's when it takes attendance, else the same rule here. */
+function windowOf(
+  event: ServerEvent,
+  fields: ServerSessionFields,
+  timeZone: string
+): { opensAt: Date; closesAt: Date } {
+  if (fields.checkInOpensAt && fields.checkInClosesAt) {
+    return {
+      opensAt: new Date(fields.checkInOpensAt),
+      closesAt: new Date(fields.checkInClosesAt),
+    };
+  }
+  const start = zonedInstant(
+    fields.sessionDate,
+    event.startTime ?? "00:00",
+    timeZone
+  );
+  const end = zonedInstant(
+    fields.sessionDate,
+    event.endTime ?? "23:59",
+    timeZone
+  );
+  return {
+    opensAt: addMinutes(start, -WINDOW_OPENS_BEFORE_MIN),
+    closesAt: addMinutes(end, WINDOW_CLOSES_AFTER_MIN),
+  };
 }
 
-function buildSession(
-  event: CalendarEvent,
-  date: DateOnly,
-  asOf: Date
-): Session {
-  const academy = academyOf(event.academyId);
-  const timeZone = academy.timezone;
-  const start = zonedInstant(date, event.startTime ?? "00:00", timeZone);
-  const end = zonedInstant(date, event.endTime ?? "23:59", timeZone);
-  const opensAt = addMinutes(start, -WINDOW_OPENS_BEFORE_MIN);
-  const closesAt = addMinutes(end, WINDOW_CLOSES_AFTER_MIN);
-  const team = teams.find((t) => t.id === event.teamId) ?? null;
-  const today = localDate(asOf, timeZone);
-  const students = academyMembers.filter(
-    (m) =>
-      m.roles.includes("student") &&
-      event.teamId !== null &&
-      m.teamIds.includes(event.teamId)
-  );
-  const roster: SessionEntry[] = students.map((m) => {
-    const found = attendanceRows.find(
-      (r) =>
-        r.eventId === event.id &&
-        r.sessionDate === date &&
-        r.studentId === m.userId
-    );
-    return {
-      student: {
-        id: m.userId,
-        name: m.user.name,
-        image: m.user.image,
-        tint: tintFor(m.userId),
-        feesOverdueDays: overdueDays(m.userId, today),
+function buildRoster(
+  roster: RosterMember[],
+  rows: ServerAttendance[],
+  overdue: Map<Id, number>
+): SessionEntry[] {
+  const live = rows.filter((r) => !r.voidedAt);
+  const byStudent = new Map(live.map((r) => [r.studentId, r]));
+  const entries: SessionEntry[] = roster.map((m) => ({
+    student: {
+      id: m.userId,
+      name: m.name,
+      image: m.image,
+      tint: tintFor(m.userId),
+      feesOverdueDays: overdue.get(m.userId) ?? null,
+    },
+    attendance: byStudent.get(m.userId) ?? null,
+  }));
+  // Rows for students no longer on the team (or an academy-wide event) still show.
+  const onRoster = new Set(roster.map((m) => m.userId));
+  for (const row of live) {
+    if (!onRoster.has(row.studentId)) {
+      entries.push({
+        student: {
+          id: row.studentId,
+          name: row.student?.name ?? "Student",
+          image: row.student?.image ?? null,
+          tint: tintFor(row.studentId),
+          feesOverdueDays: overdue.get(row.studentId) ?? null,
+        },
+        attendance: row,
+      });
+    }
+  }
+  return entries;
+}
+
+/** Later weekly copies of the same event (bulk-created series share title, team and time). */
+async function loadSeriesDates(
+  academyId: Id,
+  event: ServerEvent,
+  date: DateOnly
+): Promise<DateOnly[]> {
+  const occurrences = await apiAll<ServerOccurrence>(
+    academyPath(academyId, "/events"),
+    {
+      query: {
+        from: date,
+        to: addDays(date, SERIES_LOOKAHEAD_DAYS),
+        teamId: event.teamId ?? undefined,
       },
-      attendance: found ? rowAsOf(found, asOf) : null,
-    };
-  });
-  return {
-    event,
-    sessionDate: date,
-    timeZone,
-    academyName: academy.name,
-    team: team ? { id: team.id, name: team.name } : null,
-    opensAt: opensAt.toISOString(),
-    closesAt: closesAt.toISOString(),
-    status: sessionStatus(event, date, opensAt, closesAt, asOf),
-    roster,
-    seriesDates: seriesDatesFrom(event, date),
-    cancelReason: cancelReasons.get(`${event.id}:${date}`) ?? null,
-  };
+    }
+  );
+  return seriesOf(occurrences, event, date).map((o) => o.sessionDate);
+}
+
+function seriesOf(
+  occurrences: ServerOccurrence[],
+  event: ServerEvent,
+  date: DateOnly
+): ServerOccurrence[] {
+  return occurrences
+    .filter(
+      (o) =>
+        o.title === event.title &&
+        o.teamId === event.teamId &&
+        o.startTime === event.startTime &&
+        o.endDate === null &&
+        o.sessionDate >= date &&
+        Math.round(
+          (Date.parse(o.sessionDate) - Date.parse(date)) / 86_400_000
+        ) %
+          DAYS_PER_WEEK ===
+          0
+    )
+    .sort((a, b) => a.sessionDate.localeCompare(b.sessionDate));
+}
+
+async function getEvent(
+  academyId: Id,
+  eventId: Id
+): Promise<ServerEvent | null> {
+  try {
+    return await apiData<ServerEvent>(
+      academyPath(academyId, `/events/${eventId}`)
+    );
+  } catch (error) {
+    if (isApiError(error) && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /**
  * One session with its roster and check-ins.
- * Real: GET /events/:id + GET /attendance?eventId=&date= + organization.listTeamMembers
- * + GET /fees/outstanding?teamId= (the "FEES 18D" tags).
+ * GET /events/:id + GET /events/:id/sessions?from=&to=&includeCancelled=true
+ * + GET /teams/:teamId/members + GET /attendance?eventId=&date=
+ * + GET /fees/outstanding?teamId= (the "FEES 18D" tags) + the weekly series (GET /events).
  */
 export async function getSession(
-  academyId: Id,
+  academy: SessionAcademy,
   eventId: Id,
   params: { date?: DateOnly; asOf: Timestamp }
 ): Promise<Session | null> {
-  await fixtureDelay();
-  const event = calendarEvents.find(
-    (e) => e.id === eventId && e.academyId === academyId
-  );
+  if (mock) {
+    return (await mock()).getSession(academy, eventId, params);
+  }
+  const academyId = academy.id;
+  const event = await getEvent(academyId, eventId);
   if (!event) {
     return null;
   }
   const asOf = new Date(params.asOf);
-  return buildSession(event, params.date ?? event.startDate, asOf);
+  const today = localDate(asOf, academy.timezone);
+  const lastDay = event.endDate ?? event.startDate;
+  const date =
+    params.date ??
+    (today >= event.startDate && today <= lastDay ? today : event.startDate);
+  const [sessions, roster, rows, overdue, teams, seriesDates] =
+    await Promise.all([
+      apiData<ServerSessionFields[]>(
+        academyPath(academyId, `/events/${eventId}/sessions`),
+        { query: { from: date, to: date, includeCancelled: true } }
+      ),
+      event.teamId
+        ? loadRoster(academyId, event.teamId)
+        : Promise.resolve([] as RosterMember[]),
+      apiAll<ServerAttendance>(academyPath(academyId, "/attendance"), {
+        query: { eventId, date },
+      }),
+      loadOverdue(academyId, event.teamId),
+      loadTeams(academyId),
+      loadSeriesDates(academyId, event, date),
+    ]);
+  const [fields] = sessions;
+  if (!fields) {
+    return null;
+  }
+  const { opensAt, closesAt } = windowOf(event, fields, academy.timezone);
+  const teamName = event.teamId ? teams.get(event.teamId) : undefined;
+  return {
+    event: toCalendarEvent(event),
+    sessionDate: date,
+    timeZone: academy.timezone,
+    academyName: academy.name,
+    team:
+      event.teamId && teamName ? { id: event.teamId, name: teamName } : null,
+    opensAt: opensAt.toISOString(),
+    closesAt: closesAt.toISOString(),
+    status: sessionStatus(fields.cancelled, opensAt, closesAt, asOf),
+    roster: buildRoster(roster, rows, overdue),
+    seriesDates,
+    cancelReason: null,
+  };
 }
 
 /**
- * The coach's sessions on one day, in time order.
- * Real: GET /events?from=&to=&teamId= (academy-wide + own teams) and
- * GET /attendance?eventId=&date= per session that takes attendance.
+ * The coach's team sessions on one day, in time order.
+ * GET /events?from=date&to=date&includeCancelled=true, then one roster per team,
+ * GET /attendance?date= and GET /fees/outstanding for all of them at once.
  */
 export async function listSessionsOn(
-  academyId: Id,
+  academy: SessionAcademy,
   params: { date: DateOnly; teamIds: Id[]; asOf: Timestamp }
 ): Promise<Session[]> {
-  await fixtureDelay();
+  if (mock) {
+    return (await mock()).listSessionsOn(academy, params);
+  }
+  const academyId = academy.id;
   const asOf = new Date(params.asOf);
-  return calendarEvents
-    .filter(
-      (e) =>
-        e.academyId === academyId &&
-        e.startDate === params.date &&
-        e.teamId !== null &&
-        params.teamIds.includes(e.teamId)
-    )
+  const occurrences = (
+    await apiAll<ServerOccurrence>(academyPath(academyId, "/events"), {
+      query: { from: params.date, to: params.date, includeCancelled: true },
+    })
+  ).filter((o) => o.teamId !== null && params.teamIds.includes(o.teamId));
+  if (occurrences.length === 0) {
+    return [];
+  }
+  const teamIds = [...new Set(occurrences.map((o) => o.teamId as Id))];
+  const [rosters, rows, overdue, teams] = await Promise.all([
+    Promise.all(teamIds.map((id) => loadRoster(academyId, id))),
+    apiAll<ServerAttendance>(academyPath(academyId, "/attendance"), {
+      query: { date: params.date },
+    }),
+    loadOverdue(academyId, null),
+    loadTeams(academyId),
+  ]);
+  const rosterByTeam = new Map(
+    teamIds.map((id, index) => [id, rosters[index] ?? []])
+  );
+  return occurrences
     .sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? ""))
-    .map((e) => buildSession(e, params.date, asOf));
+    .map((o) => {
+      const teamId = o.teamId as Id;
+      const { opensAt, closesAt } = windowOf(o, o, academy.timezone);
+      return {
+        event: toCalendarEvent(o),
+        sessionDate: params.date,
+        timeZone: academy.timezone,
+        academyName: academy.name,
+        team: { id: teamId, name: teams.get(teamId) ?? "" },
+        opensAt: opensAt.toISOString(),
+        closesAt: closesAt.toISOString(),
+        status: sessionStatus(o.cancelled, opensAt, closesAt, asOf),
+        roster: buildRoster(
+          rosterByTeam.get(teamId) ?? [],
+          rows.filter((r) => r.eventId === o.id),
+          overdue
+        ),
+        seriesDates: [],
+        cancelReason: null,
+      };
+    });
 }
 
 /**
  * Record attendance by hand, in bulk for one session (CO-4 check in, CO-5 mark absent).
- * Real: POST /attendance { eventId, sessionDate, entries } with an Idempotency-Key.
+ * POST /attendance { eventId, sessionDate, entries } with an Idempotency-Key (made once
+ * per user action by the caller and reused on retry). A coach recording someone present
+ * or late by hand has seen them, so those rows are then ticked (POST /attendance/verify).
  */
 export async function recordAttendance(
   academyId: Id,
@@ -268,157 +509,171 @@ export async function recordAttendance(
     eventId: Id;
     sessionDate: DateOnly;
     entries: AttendanceEntryInput[];
-    recordedBy: Id;
     asOf: Timestamp;
+    idempotencyKey: string;
   }
-): Promise<AttendanceRecord[]> {
-  await fixtureDelay();
-  const created: AttendanceRecord[] = [];
-  for (const entry of input.entries) {
-    const exists = attendanceRows.some(
-      (r) =>
-        r.eventId === input.eventId &&
-        r.sessionDate === input.sessionDate &&
-        r.studentId === entry.studentId &&
-        !r.voidedAt
-    );
-    if (exists) {
-      throw new Error("This student already has attendance for this session.");
+): Promise<SessionAttendance[]> {
+  if (mock) {
+    return (await mock()).recordAttendance(academyId, input);
+  }
+  const rows = await apiData<SessionAttendance[]>(
+    academyPath(academyId, "/attendance"),
+    {
+      method: "POST",
+      idempotencyKey: input.idempotencyKey,
+      body: {
+        eventId: input.eventId,
+        sessionDate: input.sessionDate,
+        entries: input.entries.map((entry) => ({
+          studentId: entry.studentId,
+          status: entry.status,
+          ...(entry.checkInAt ? { checkInAt: entry.checkInAt } : {}),
+          ...(entry.notes ? { notes: entry.notes } : {}),
+        })),
+      },
     }
-    const id = `att-${input.eventId}-${input.sessionDate}-${entry.studentId}`;
-    const record: AttendanceRecord = {
-      id,
-      academyId,
-      eventId: input.eventId,
-      sessionDate: input.sessionDate,
-      studentId: entry.studentId,
-      status: entry.status,
-      checkInAt: entry.checkInAt ?? null,
-      checkInDistanceM: null,
-      checkOutAt: null,
-      checkOutDistanceM: null,
-      recordedBy: input.recordedBy,
-      // A coach recording someone by hand has seen them: count it as ticked.
-      verifiedAt:
-        entry.status === "present" || entry.status === "late"
-          ? input.asOf
-          : null,
-      verifiedBy:
-        entry.status === "present" || entry.status === "late"
-          ? input.recordedBy
-          : null,
-      voidedAt: null,
-      voidedBy: null,
-      voidReason: null,
-      notes: entry.notes ?? null,
-    };
-    rowCreatedAt.set(id, input.asOf);
-    attendanceRows.push(record);
-    created.push(record);
+  );
+  const seen = rows
+    .filter((r) => r.status === "present" || r.status === "late")
+    .map((r) => r.id);
+  if (seen.length > 0) {
+    await verifyAttendance(academyId, { ids: seen, asOf: input.asOf });
   }
-  return created;
+  return rows;
 }
 
-function findRow(id: Id): AttendanceRecord {
-  const found = attendanceRows.find((r) => r.id === id);
-  if (!found) {
-    throw new Error(`Attendance ${id} not found`);
-  }
-  return found;
+interface BulkVerifyResult {
+  id: Id;
+  result: string;
 }
 
 /**
  * Tick (verify) one or more check-ins: "I saw this student" (CO-3).
- * Real: POST /attendance/:id/verify, or POST /attendance/verify { ids } for "Tick all".
+ * POST /attendance/:id/verify for one, POST /attendance/verify { ids } for "Tick all".
+ * Returns the ids that are now ticked.
  */
 export async function verifyAttendance(
-  _academyId: Id,
-  input: { ids: Id[]; verifiedBy: Id; asOf: Timestamp }
+  academyId: Id,
+  input: { ids: Id[]; asOf: Timestamp }
 ): Promise<{ ids: Id[] }> {
-  await fixtureDelay();
-  for (const id of input.ids) {
-    const found = findRow(id);
-    if (
-      !found.verifiedAt ||
-      new Date(found.verifiedAt) > new Date(input.asOf)
-    ) {
-      found.verifiedAt = input.asOf;
-      found.verifiedBy = input.verifiedBy;
-    }
+  if (mock) {
+    return (await mock()).verifyAttendance(academyId, input);
   }
-  return { ids: input.ids };
+  if (input.ids.length === 1 && input.ids[0]) {
+    await apiData(
+      academyPath(academyId, `/attendance/${input.ids[0]}/verify`),
+      { method: "POST" }
+    );
+    return { ids: input.ids };
+  }
+  const results = await apiData<BulkVerifyResult[]>(
+    academyPath(academyId, "/attendance/verify"),
+    { method: "POST", body: { ids: input.ids } }
+  );
+  return {
+    ids: results
+      .filter((r) => r.result === "verified" || r.result === "unchanged")
+      .map((r) => r.id),
+  };
 }
 
 /**
- * Untick a mistaken tap; only while the window is open (the server answers 409 after).
- * Real: DELETE /attendance/:id/verify.
+ * Untick a mistaken tap; only while the window is open (409 `window_closed` after).
+ * DELETE /attendance/:id/verify.
  */
 export async function unverifyAttendance(
-  _academyId: Id,
+  academyId: Id,
   input: { id: Id }
 ): Promise<{ id: Id }> {
-  await fixtureDelay();
-  const found = findRow(input.id);
-  found.verifiedAt = null;
-  found.verifiedBy = null;
+  if (mock) {
+    return (await mock()).unverifyAttendance(academyId, input);
+  }
+  await apiRaw(academyPath(academyId, `/attendance/${input.id}/verify`), {
+    method: "DELETE",
+  });
   return { id: input.id };
 }
 
 /**
- * Cancel one day of an event (CO-6). Refused once anyone has checked in.
- * Real: POST /events/:id/sessions/:date/cancel. The reason travels with it so
- * the students' notification can show it.
+ * Check a student out by hand (the one allowed change to a row).
+ * POST /attendance/:id/check-out (checkOutAt defaults to now on the server).
+ * 409 `already_checked_out`, 422 `not_checked_in`.
+ */
+export async function checkOutAttendance(
+  academyId: Id,
+  input: { id: Id }
+): Promise<SessionAttendance> {
+  if (mock) {
+    return (await mock()).checkOutAttendance(academyId, input);
+  }
+  return await apiData<SessionAttendance>(
+    academyPath(academyId, `/attendance/${input.id}/check-out`),
+    { method: "POST", body: {} }
+  );
+}
+
+/**
+ * Cancel one day of an event (CO-6). Refused once anyone has checked in
+ * (409 `attendance_exists`). POST /events/:id/sessions/:date/cancel { reason }; the
+ * reason is kept in the audit log.
  */
 export async function cancelSession(
-  _academyId: Id,
+  academyId: Id,
   input: { eventId: Id; sessionDate: DateOnly; reason: string }
 ): Promise<{ eventId: Id; sessionDate: DateOnly }> {
-  await fixtureDelay();
-  const event = calendarEvents.find((e) => e.id === input.eventId);
-  if (!event) {
-    throw new Error("Session not found");
+  if (mock) {
+    return (await mock()).cancelSession(academyId, input);
   }
-  const hasAttendance = attendanceRows.some(
-    (r) =>
-      r.eventId === input.eventId &&
-      r.sessionDate === input.sessionDate &&
-      !r.voidedAt
+  await apiData(
+    academyPath(
+      academyId,
+      `/events/${input.eventId}/sessions/${input.sessionDate}/cancel`
+    ),
+    {
+      method: "POST",
+      body: input.reason ? { reason: input.reason } : {},
+    }
   );
-  if (hasAttendance) {
-    throw new Error("Someone has already checked in to this session.");
-  }
-  event.excludedDates.push(input.sessionDate);
-  cancelReasons.set(`${input.eventId}:${input.sessionDate}`, input.reason);
   return { eventId: input.eventId, sessionDate: input.sessionDate };
 }
 
 /**
  * Delete the rest of a weekly series (CO-6 "Delete the whole weekly series").
- * Real: DELETE /events/:id for each event in the series from this date on.
+ * DELETE /events/:id for each event in the series from this date on. An event that
+ * already has attendance is refused by the server (409 `attendance_exists`) and kept.
  */
 export async function deleteSeries(
-  _academyId: Id,
+  academyId: Id,
   input: { eventId: Id; fromDate: DateOnly }
 ): Promise<{ deleted: number }> {
-  await fixtureDelay();
-  const event = calendarEvents.find((e) => e.id === input.eventId);
+  if (mock) {
+    return (await mock()).deleteSeries(academyId, input);
+  }
+  const event = await getEvent(academyId, input.eventId);
   if (!event) {
     throw new Error("Session not found");
   }
-  const dates = new Set(seriesDatesFrom(event, input.fromDate));
-  let deleted = 0;
-  for (let i = calendarEvents.length - 1; i >= 0; i -= 1) {
-    const e = calendarEvents[i];
-    if (
-      e &&
-      e.title === event.title &&
-      e.teamId === event.teamId &&
-      e.startTime === event.startTime &&
-      dates.has(e.startDate)
-    ) {
-      calendarEvents.splice(i, 1);
-      deleted += 1;
+  const occurrences = await apiAll<ServerOccurrence>(
+    academyPath(academyId, "/events"),
+    {
+      query: {
+        from: input.fromDate,
+        to: addDays(input.fromDate, SERIES_LOOKAHEAD_DAYS),
+        teamId: event.teamId ?? undefined,
+      },
     }
+  );
+  const ids = [
+    ...new Set(seriesOf(occurrences, event, input.fromDate).map((o) => o.id)),
+  ];
+  const outcomes = await Promise.allSettled(
+    ids.map((id) =>
+      apiRaw(academyPath(academyId, `/events/${id}`), { method: "DELETE" })
+    )
+  );
+  const deleted = outcomes.filter((o) => o.status === "fulfilled").length;
+  if (deleted === 0 && outcomes[0]?.status === "rejected") {
+    throw outcomes[0].reason;
   }
   return { deleted };
 }

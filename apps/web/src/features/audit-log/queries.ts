@@ -7,9 +7,9 @@ import {
   type AuditLogParams,
   listAuditActors,
   listAuditLog,
-  mockNow,
 } from "@/features/audit-log/api";
 import type { Id } from "@/features/types";
+import { appNow } from "@/lib/preview";
 
 export type {
   AuditDateFilter,
@@ -40,7 +40,7 @@ export function auditActorsQueryOptions(academyId: Id) {
   });
 }
 
-/** The current time for relative labels ("Today, 09:14"); fixture time in mock mode. */
+/** The current time for relative labels ("Today, 09:14"); fixture time in preview. */
 export function currentTime(): Date {
-  return mockNow();
+  return appNow();
 }

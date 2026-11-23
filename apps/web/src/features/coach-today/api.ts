@@ -1,14 +1,17 @@
 /*
  * Coach Today (CO-1): the "Records waiting for you" panel and the phone nudge.
  * Sessions come from features/sessions, the team table from features/team-detail.
- * The full review queue is /coach/records (another feature); this reads only what the
- * panel needs. Fixture-backed; see the convention in features/viewer/api.ts.
+ * The full review queue is /coach/records (features/records); this reads only what the
+ * panel needs, from the same endpoint, so the panel and the queue agree.
+ * See the convention in features/viewer/api.ts; fixtures live in ./api.mock.ts.
  */
-import {
-  listReviewRecords,
-  verifyRecord as verifyReviewRecord,
-} from "@/features/records/api";
-import type { Id, RecordType, StudentRecord } from "@/features/types";
+import { formatResult } from "@/features/results/templates";
+import type { Id, RecordType } from "@/features/types";
+import { academyPath, apiAll, apiData } from "@/lib/api-client";
+import { isUiPreview } from "@/lib/preview";
+
+const mock =
+  import.meta.env.DEV && isUiPreview ? () => import("./api.mock") : null;
 
 export interface RecordToReview {
   id: Id;
@@ -20,54 +23,93 @@ export interface RecordToReview {
   teamName: string | null;
 }
 
-const DRILL_LABEL: Record<string, string> = {
-  free_throws: "Free throws",
-  three_point: "3-pt shooting",
-  penalty_kicks: "Penalty kicks",
-  dribbling: "Dribbling",
-};
+/** A record as GET /records returns it (the fields this panel reads). */
+interface ServerRecord {
+  data: Record<string, unknown>;
+  id: Id;
+  recordType: RecordType;
+  student: { id: Id; name: string };
+  studentId: Id;
+}
 
-function summarize(record: StudentRecord): string {
+interface RosterMember {
+  roles: string[];
+  userId: Id;
+}
+
+/** "100 m sprint · 12.4 s", "Report card · First term". */
+export function summarizeRecord(record: {
+  recordType: RecordType;
+  data: Record<string, unknown>;
+}): string {
   const { data } = record;
   if (record.recordType === "athletic") {
-    const label = DRILL_LABEL[String(data.drill)] ?? String(data.drill);
-    if (typeof data.seconds === "number") {
-      return `${label} · ${data.seconds} s`;
-    }
-    return `${label} · ${data.made} of ${data.attempts}`;
+    return formatResult(data);
   }
   const term = typeof data.term === "string" ? data.term.split(",")[0] : null;
   return term ? `Report card · ${term}` : "Report card";
 }
 
+/** studentId -> team name, from the rosters of the coach's teams. */
+async function studentTeams(
+  academyId: Id,
+  teams: { id: Id; name: string }[]
+): Promise<Map<Id, string>> {
+  const rosters = await Promise.all(
+    teams.map((team) =>
+      apiAll<RosterMember>(academyPath(academyId, `/teams/${team.id}/members`))
+    )
+  );
+  const result = new Map<Id, string>();
+  teams.forEach((team, index) => {
+    for (const member of rosters[index] ?? []) {
+      if (member.roles.includes("student") && !result.has(member.userId)) {
+        result.set(member.userId, team.name);
+      }
+    }
+  });
+  return result;
+}
+
 /**
- * Pending records on the coach's teams, oldest first, excluding their own entries.
- * Real: GET /records?status=pending (the server scopes it to the coach's teams).
- * Same source as the full queue at /coach/records, so the panel, the sidebar count
- * and the queue always agree.
+ * Pending records on the coach's teams, oldest first. GET /records?status=pending: the
+ * server scopes it to the coach's teams and leaves out the coach's own entries. Team
+ * names come from the coach's rosters (GET /teams/:teamId/members).
  */
 export async function listRecordsToReview(
   academyId: Id,
-  params: { teamIds: Id[]; viewerId: Id }
+  params: { teams: { id: Id; name: string }[] }
 ): Promise<RecordToReview[]> {
-  const items = await listReviewRecords(academyId, {
-    scope: { kind: "coach", ...params },
-    status: "pending",
-  });
-  return items.map((item) => ({
-    id: item.id,
-    recordType: item.recordType,
-    studentId: item.studentId,
-    studentName: item.student.name,
-    teamName: item.student.teamName,
-    summary: summarize(item),
+  if (mock) {
+    return (await mock()).listRecordsToReview(academyId, params);
+  }
+  const [records, teamOf] = await Promise.all([
+    apiAll<ServerRecord>(academyPath(academyId, "/records"), {
+      query: { status: "pending" },
+    }),
+    studentTeams(academyId, params.teams),
+  ]);
+  return records.map((record) => ({
+    id: record.id,
+    recordType: record.recordType,
+    studentId: record.studentId,
+    studentName: record.student.name,
+    teamName: teamOf.get(record.studentId) ?? null,
+    summary: summarizeRecord(record),
   }));
 }
 
-/** One-tap verify (CO-9). Real: POST /records/:id/verify. */
-export function verifyRecord(
+/** One-tap verify (CO-9). POST /records/:id/verify (the verifier is the session user). */
+export async function verifyRecord(
   academyId: Id,
-  input: { recordId: Id; verifiedBy: Id }
-): Promise<StudentRecord> {
-  return verifyReviewRecord(academyId, input.recordId, input.verifiedBy);
+  input: { recordId: Id }
+): Promise<{ id: Id }> {
+  if (mock) {
+    return (await mock()).verifyRecord(academyId, input);
+  }
+  await apiData(academyPath(academyId, `/records/${input.recordId}/verify`), {
+    method: "POST",
+    body: {},
+  });
+  return { id: input.recordId };
 }

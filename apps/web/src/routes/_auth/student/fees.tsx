@@ -25,7 +25,6 @@ function FeesPage() {
   const { academyId, timeZone, today } = useAcademyClock();
   const academyName = useActiveMembership()?.academy.name;
   const fees = useQuery(myFeesQueryOptions(academyId));
-  const latest = fees.data?.data[0];
 
   return (
     <div className="flex flex-col gap-8 max-md:gap-5 lg:max-w-[1040px]">
@@ -47,7 +46,7 @@ function FeesPage() {
               today={today}
             />
           ) : (
-            <PaidUpCard paidUpTo={latest?.periodEnd ?? null} />
+            <PaidUpCard paidUpTo={fees.data.paidThrough} />
           )}
           <PaymentHistory fees={fees.data.data} timeZone={timeZone} />
         </div>

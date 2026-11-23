@@ -1,6 +1,6 @@
 import { CountryDot } from "@hoops-genesis/ui/components/chip";
 import { cn } from "@hoops-genesis/ui/lib/utils";
-
+import type { MyAttendance } from "@/features/student-attendance/queries";
 import { dayOfMonth, weekdayShort } from "@/features/student-calendar/dates";
 import type { StudentEvent } from "@/features/student-calendar/queries";
 import {
@@ -8,7 +8,7 @@ import {
   eventTitle,
   isCancelledOn,
 } from "@/features/student-calendar/selectors";
-import type { AttendanceRecord, Country, DateOnly } from "@/features/types";
+import type { Country, DateOnly } from "@/features/types";
 import { formatLongDate, formatTime } from "@/lib/format";
 
 /*
@@ -65,7 +65,7 @@ const TONE = {
 >;
 
 function attendanceLine(
-  row: AttendanceRecord | undefined,
+  row: MyAttendance | undefined,
   timeZone: string
 ): { text: string; tone: LineTone } | null {
   if (!row) {
@@ -106,7 +106,7 @@ export function EventCard({
   /** The day this row is for (multi-day events appear on each of their days). */
   date: DateOnly;
   today: DateOnly;
-  attendance?: AttendanceRecord;
+  attendance?: MyAttendance;
   /** The academy's country, for the "Whole academy" dot. */
   country: Country;
   timeZone: string;

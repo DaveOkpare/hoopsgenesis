@@ -11,13 +11,14 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-
+import { ErrorState } from "@/components/error-state";
 import {
   type MemberCandidate,
   memberSearchQueryOptions,
   useAddTeamMember,
 } from "@/features/team-detail/queries";
 import type { Id, Team } from "@/features/types";
+import { errorMessage } from "@/lib/api-client";
 import { initials } from "@/lib/format";
 
 function SearchGlyph() {
@@ -87,9 +88,10 @@ function CandidateRow({
           </div>
           <Button
             className="border-ink px-4 py-2"
-            data-member-id={candidate.memberId}
             data-moved-from={other.name}
+            data-moved-from-id={other.id}
             data-name={candidate.user.name}
+            data-user-id={candidate.user.id}
             disabled={pending}
             onClick={onAdd}
             size="sm"
@@ -120,8 +122,8 @@ function CandidateRow({
       </div>
       <Button
         className="px-4 py-2"
-        data-member-id={candidate.memberId}
         data-name={candidate.user.name}
+        data-user-id={candidate.user.id}
         disabled={pending}
         onClick={onAdd}
         size="sm"
@@ -160,9 +162,11 @@ export function AddMemberPanel({
 }) {
   const [query, setQuery] = useState(initialQuery);
   const inputId = useId();
-  const search = useQuery(
-    memberSearchQueryOptions(academyId, team.id, memberRole, query)
-  );
+  // A failed search shows under the box (keeping what was typed), not over the page.
+  const search = useQuery({
+    ...memberSearchQueryOptions(academyId, team.id, memberRole, query),
+    throwOnError: false,
+  });
   const add = useAddTeamMember(academyId);
   const { mutate, isPending } = add;
   const handleQuery = useCallback(
@@ -171,12 +175,13 @@ export function AddMemberPanel({
   );
   const handleAdd = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
-      const { memberId, name, movedFrom } = event.currentTarget.dataset;
-      if (!memberId) {
+      const { userId, name, movedFrom, movedFromId } =
+        event.currentTarget.dataset;
+      if (!userId) {
         return;
       }
       mutate(
-        { teamId: team.id, memberId },
+        { teamId: team.id, userId, fromTeamId: movedFromId ?? null },
         {
           onSuccess: () =>
             toast.success(
@@ -184,7 +189,8 @@ export function AddMemberPanel({
                 ? `${name} moved from ${movedFrom} to ${team.name}`
                 : `${name} added to ${team.name}`
             ),
-          onError: (error) => toast.error(error.message),
+          onError: (error) =>
+            toast.error(errorMessage(error, "Couldn't add them. Try again.")),
         }
       );
     },
@@ -219,12 +225,19 @@ export function AddMemberPanel({
           value={query}
         />
       </div>
-      {hasQuery ? (
+      {hasQuery && search.isError && !search.data ? (
+        <ErrorState
+          error={search.error}
+          onRetry={search.refetch}
+          what="matching members"
+        />
+      ) : null}
+      {hasQuery && !search.isError ? (
         <ul aria-live="polite" className="flex flex-col gap-[14px]">
           {results.map((candidate) => (
             <CandidateRow
               candidate={candidate}
-              key={candidate.memberId}
+              key={candidate.user.id}
               onAdd={handleAdd}
               pending={isPending}
               team={team}
@@ -237,7 +250,8 @@ export function AddMemberPanel({
             </li>
           ) : null}
         </ul>
-      ) : (
+      ) : null}
+      {hasQuery ? null : (
         <p className="text-[13px] text-muted leading-[18px]">
           Search academy members by name or email.
         </p>

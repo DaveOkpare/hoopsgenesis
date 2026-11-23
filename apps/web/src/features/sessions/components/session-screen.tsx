@@ -41,25 +41,29 @@ import {
   opensAtLabel,
   type SessionCounts,
   sessionCounts,
+  sessionErrorMessage,
   sessionTimes,
   sessionTitle,
 } from "@/features/sessions/model";
 import {
   asOfKey,
   type Session,
+  type SessionAcademy,
   type SessionEntry,
   sessionQueryOptions,
+  useCheckOutAttendance,
   useRecordAttendance,
   useUnverifyAttendance,
   useVerifyAttendance,
 } from "@/features/sessions/queries";
 import { formatWeekdayDayMonth } from "@/features/sessions/time";
 import type { DateOnly, Id } from "@/features/types";
+import { isUiPreview } from "@/lib/preview";
 
 export type SessionSheet = "check-in" | "cancel";
 
 interface SessionScreenProps {
-  academyId: Id;
+  academy: SessionAcademy;
   date?: DateOnly;
   eventId: Id;
   now: Date;
@@ -232,12 +236,14 @@ function CheckedInGroup({
   viewerId,
   pendingIds,
   onToggleTick,
+  onCheckOut,
 }: {
   session: Session;
   entries: SessionEntry[];
   viewerId: Id;
   pendingIds: Set<Id>;
   onToggleTick: (event: MouseEvent<HTMLButtonElement>) => void;
+  onCheckOut: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const { visible, hiddenCount, expanded, toggle } =
     useCollapsedTicked(entries);
@@ -257,13 +263,29 @@ function CheckedInGroup({
               entry={entry}
               key={entry.student.id}
               trailing={
-                <TickToggle
-                  canUntick={session.status === "open"}
-                  entry={entry}
-                  onToggle={onToggleTick}
-                  pending={Boolean(row && pendingIds.has(row.id))}
-                  ticked={ticked}
-                />
+                <span className="flex shrink-0 items-center gap-2">
+                  {/* Check out by hand (POST /attendance/:id/check-out). Not in the
+                      designs, so preview keeps the rows as drawn. */}
+                  {row?.checkInAt && !isUiPreview ? (
+                    <Button
+                      data-attendance-id={row.id}
+                      data-student-name={entry.student.name}
+                      disabled={pendingIds.has(row.id)}
+                      onClick={onCheckOut}
+                      size="xs"
+                      variant="ghost"
+                    >
+                      Check out
+                    </Button>
+                  ) : null}
+                  <TickToggle
+                    canUntick={session.status === "open"}
+                    entry={entry}
+                    onToggle={onToggleTick}
+                    pending={Boolean(row && pendingIds.has(row.id))}
+                    ticked={ticked}
+                  />
+                </span>
               }
             />
           );
@@ -458,9 +480,9 @@ function SessionMissing() {
 
 /** Live check-ins (3O4-0), close out (5IC-0) and their sheets (3WI-0, 5KW-0). */
 export function SessionScreen(props: SessionScreenProps) {
-  const { academyId, eventId, date, now } = props;
+  const { academy, eventId, date, now } = props;
   const asOf = asOfKey(now);
-  const query = useQuery(sessionQueryOptions(academyId, eventId, date, asOf));
+  const query = useQuery(sessionQueryOptions(academy, eventId, date, asOf));
   const { data } = query;
   if (data === undefined) {
     return <SessionSkeleton />;
@@ -473,7 +495,7 @@ export function SessionScreen(props: SessionScreenProps) {
 
 function SessionView({
   session,
-  academyId,
+  academy,
   viewerId,
   now,
   sheet,
@@ -484,7 +506,9 @@ function SessionView({
 }: SessionScreenProps & { session: Session }) {
   const groups = groupSession(session);
   const counts = sessionCounts(session, viewerId);
+  const academyId = academy.id;
   const verify = useVerifyAttendance(academyId);
+  const checkOut = useCheckOutAttendance(academyId);
   const unverify = useUnverifyAttendance(academyId);
   const record = useRecordAttendance(academyId);
   const asOf = asOfKey(now);
@@ -498,10 +522,32 @@ function SessionView({
   if (unverify.isPending && unverify.variables) {
     pendingIds.add(unverify.variables.id);
   }
+  if (checkOut.isPending && checkOut.variables) {
+    pendingIds.add(checkOut.variables.id);
+  }
 
   const { mutate: verifyMutate } = verify;
   const { mutate: unverifyMutate } = unverify;
   const { mutate: recordMutate } = record;
+  const { mutate: checkOutMutate } = checkOut;
+
+  const handleCheckOut = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      const id = event.currentTarget.dataset.attendanceId;
+      const name = event.currentTarget.dataset.studentName;
+      if (!id) {
+        return;
+      }
+      checkOutMutate(
+        { id },
+        {
+          onSuccess: () => toast.success(`${name ?? "Student"} checked out`),
+          onError: (error) => toast.error(sessionErrorMessage(error)),
+        }
+      );
+    },
+    [checkOutMutate]
+  );
 
   const handleToggleTick = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
@@ -513,12 +559,18 @@ function SessionView({
         return;
       }
       if (holder.dataset.ticked === "true") {
-        unverifyMutate({ id });
+        unverifyMutate(
+          { id },
+          { onError: (error) => toast.error(sessionErrorMessage(error)) }
+        );
       } else {
-        verifyMutate({ ids: [id], verifiedBy: viewerId, asOf });
+        verifyMutate(
+          { ids: [id], asOf },
+          { onError: (error) => toast.error(sessionErrorMessage(error)) }
+        );
       }
     },
-    [asOf, unverifyMutate, verifyMutate, viewerId]
+    [asOf, unverifyMutate, verifyMutate]
   );
 
   const untickedIds = groups.checkedIn
@@ -526,12 +578,13 @@ function SessionView({
     .flatMap((e) => (e.attendance ? [e.attendance.id] : []));
   const handleTickAll = useCallback(() => {
     verifyMutate(
-      { ids: untickedIds, verifiedBy: viewerId, asOf },
+      { ids: untickedIds, asOf },
       {
         onSuccess: ({ ids }) => toast.success(`${ids.length} ticked`),
+        onError: (error) => toast.error(sessionErrorMessage(error)),
       }
     );
-  }, [asOf, untickedIds, verifyMutate, viewerId]);
+  }, [asOf, untickedIds, verifyMutate]);
 
   const remainingIds = groups.notYet.map((e) => e.student.id);
   const handleMarkAbsent = useCallback(() => {
@@ -539,7 +592,6 @@ function SessionView({
       {
         eventId: session.event.id,
         sessionDate: session.sessionDate,
-        recordedBy: viewerId,
         asOf,
         entries: remainingIds.map((id) => ({
           studentId: id,
@@ -548,10 +600,10 @@ function SessionView({
       },
       {
         onSuccess: (rows) => toast.success(`${rows.length} marked absent`),
-        onError: (error) => toast.error(error.message),
+        onError: (error) => toast.error(sessionErrorMessage(error)),
       }
     );
-  }, [asOf, recordMutate, remainingIds, session, viewerId]);
+  }, [asOf, recordMutate, remainingIds, session]);
 
   const handleExcuse = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
@@ -563,17 +615,16 @@ function SessionView({
         {
           eventId: session.event.id,
           sessionDate: session.sessionDate,
-          recordedBy: viewerId,
           asOf,
           entries: [{ studentId: id, status: "excused" }],
         },
         {
           onSuccess: () => toast.success("Marked as excused"),
-          onError: (error) => toast.error(error.message),
+          onError: (error) => toast.error(sessionErrorMessage(error)),
         }
       );
     },
-    [asOf, recordMutate, session, viewerId]
+    [asOf, recordMutate, session]
   );
 
   const handleCheckIn = useCallback(
@@ -675,6 +726,7 @@ function SessionView({
           </div>
           <CheckedInGroup
             entries={groups.checkedIn}
+            onCheckOut={handleCheckOut}
             onToggleTick={handleToggleTick}
             pendingIds={pendingIds}
             session={session}
@@ -728,7 +780,6 @@ function SessionView({
         now={now}
         onClose={onCloseSheet}
         session={session}
-        viewerId={viewerId}
       />
       <CancelDialog
         academyId={academyId}

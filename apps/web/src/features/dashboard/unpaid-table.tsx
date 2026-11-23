@@ -66,6 +66,9 @@ function OverdueBadge({
   if (!row.lastPaidAt && row.joinedAt) {
     return <Badge>Joined {dayShortMonth(row.joinedAt, timeZone)}</Badge>;
   }
+  if (!row.dueDate) {
+    return <Badge>Never paid</Badge>;
+  }
   const days = calendarDaysBetween(row.dueDate, now, timeZone);
   return (
     <Badge variant={days > DANGER_AFTER_DAYS ? "danger" : "warning"}>
@@ -81,8 +84,8 @@ function toCsv(rows: UnpaidStudent[], timeZone?: string): string {
       row.studentName,
       row.teamName ?? "",
       row.lastPaidAt ? monthAndDay(row.lastPaidAt, timeZone) : "Never paid",
-      row.dueDate,
-      formatMoney(row.amount),
+      row.dueDate ?? "",
+      row.amount ? formatMoney(row.amount) : "",
     ]
       .map((cell) => `"${cell.replaceAll('"', '""')}"`)
       .join(",")
@@ -147,7 +150,7 @@ function UnpaidRows({
                 <OverdueBadge now={now} row={row} timeZone={timeZone} />
               </TableCell>
               <TableCell className="text-right font-medium text-ink">
-                {formatMoney(row.amount)}
+                {row.amount ? formatMoney(row.amount) : "—"}
               </TableCell>
               <TableCell className="text-right">
                 <DropdownMenu>

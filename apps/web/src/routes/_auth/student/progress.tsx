@@ -22,63 +22,68 @@ import {
   ResultList,
 } from "@/features/student-progress/progress-views";
 import {
-  DRILLS,
-  type DrillId,
-  drillLabel,
   drillProgress,
+  resultSeries,
+  seriesWithData,
 } from "@/features/student-progress/selectors";
-import { studentRecordsQueryOptions } from "@/features/student-records/queries";
+import {
+  recordTemplatesQueryOptions,
+  studentRecordsQueryOptions,
+} from "@/features/student-records/queries";
 import { useViewer } from "@/features/viewer/queries";
 
-type ProgressTab = DrillId | "report_cards";
-
-const TABS: { id: ProgressTab; label: string }[] = [
-  ...DRILLS,
-  { id: "report_cards", label: "Report cards" },
-];
-
-function isTab(value: unknown): value is ProgressTab {
-  return TABS.some((tab) => tab.id === value);
-}
+const REPORT_CARDS = "report_cards";
 
 interface ProgressSearch {
-  show?: ProgressTab;
+  /** A result series id (template key, or "<key>.<field>"), or "report_cards". */
+  show?: string;
 }
 
 export const Route = createFileRoute("/_auth/student/progress")({
   validateSearch: (search: Record<string, unknown>): ProgressSearch =>
-    isTab(search.show) && search.show !== "free_throws"
-      ? { show: search.show }
-      : {},
+    typeof search.show === "string" && search.show ? { show: search.show } : {},
   component: ProgressPage,
 });
 
 function ProgressPage() {
-  const { show = "free_throws" } = Route.useSearch();
+  const search = Route.useSearch();
   const navigate = useNavigate({ from: "/student/progress" });
   const viewer = useViewer();
   const { academyId, timeZone, today } = useAcademyClock();
   const records = useQuery(
     studentRecordsQueryOptions(academyId, viewer.user.id)
   );
+  const templates = useQuery(recordTemplatesQueryOptions(academyId));
+
+  const data = records.data ?? [];
+  const series = seriesWithData(resultSeries(templates.data ?? []), data);
+  const tabs = [
+    ...series.map(({ id, label }) => ({ id, label })),
+    { id: REPORT_CARDS, label: "Report cards" },
+  ];
+  const [firstTab] = tabs;
+  const defaultTab = firstTab?.id ?? REPORT_CARDS;
+  const show = tabs.some((tab) => tab.id === search.show)
+    ? (search.show ?? defaultTab)
+    : defaultTab;
 
   const selectTab = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
       const { tab } = event.currentTarget.dataset;
-      if (isTab(tab)) {
+      if (tab) {
         navigate({
-          search: tab === "free_throws" ? {} : { show: tab },
+          search: tab === defaultTab ? {} : { show: tab },
           replace: true,
         });
       }
     },
-    [navigate]
+    [navigate, defaultTab]
   );
 
-  const data = records.data ?? [];
-  const isDrill = show !== "report_cards";
-  const progress = isDrill ? drillProgress(data, show) : null;
+  const current = series.find((s) => s.id === show);
+  const progress = current ? drillProgress(data, current) : null;
   const reportCards = data.filter((r) => r.recordType === "academic");
+  const ready = Boolean(records.data && templates.data);
 
   return (
     <div className="flex flex-col gap-8 max-md:gap-5">
@@ -109,7 +114,7 @@ function ProgressPage() {
         className="-mt-2 flex gap-[6px] overflow-x-auto max-md:mt-0"
         role="toolbar"
       >
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <FilterChip
             className="px-[14px]"
             data-tab={tab.id}
@@ -122,23 +127,23 @@ function ProgressPage() {
         ))}
       </div>
 
-      {records.data ? null : (
+      {ready ? null : (
         <div className="flex flex-col gap-5 lg:max-w-[640px]">
           <Skeleton className="h-[290px] rounded-lg" />
           <Skeleton className="h-[120px] rounded-md" />
         </div>
       )}
-      {records.data && progress ? (
+      {ready && progress ? (
         <div className="grid items-start gap-8 max-md:gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
           <ChartCard
-            label={drillLabel(show)}
+            label={progress.series.label}
             progress={progress}
             today={today}
           />
           <ResultList progress={progress} today={today} />
         </div>
       ) : null}
-      {records.data && !progress ? (
+      {ready && !progress ? (
         <div className="lg:max-w-[640px]">
           <ReportCardList records={reportCards} timeZone={timeZone} />
         </div>

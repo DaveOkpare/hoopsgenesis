@@ -17,7 +17,7 @@ import {
 } from "@hoops-genesis/ui/components/dropdown-menu";
 import { cn } from "@hoops-genesis/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
-
+import { toast } from "sonner";
 import { AvatarUserMenu } from "@/components/app-shell/user-menu";
 import { BrandMark } from "@/components/brand-mark";
 import type { Membership } from "@/features/viewer/api";
@@ -33,6 +33,7 @@ import {
   primaryRole,
   roleLabel,
 } from "@/features/viewer/selectors";
+import { errorMessage } from "@/lib/api-client";
 
 function UpDownChevron() {
   return (
@@ -84,13 +85,26 @@ function useSwitchAcademy() {
       { academyId: membership.academy.id },
       {
         onSuccess: () => navigate({ to: `/${primaryRole(membership)}` }),
+        onError: (error) =>
+          toast.error(
+            errorMessage(error, "Couldn’t switch academy. Try again.")
+          ),
       }
     );
   };
 }
 
-/** Card at the top of the light sidebar ("Hoops Genesis Kigali · Rwanda · Admin"). */
-export function AcademySwitcher() {
+/**
+ * Academy card ("Hoops Genesis Kigali · Rwanda · Admin"); opens the academy menu when the
+ * person has more than one academy.
+ * variant="card": top of the light sidebar and the tablet drawer (full width, 36px mark).
+ * variant="bar": compact chip in the tablet top bar (32px mark).
+ */
+export function AcademySwitcher({
+  variant = "card",
+}: {
+  variant?: "card" | "bar";
+} = {}) {
   const viewer = useViewer();
   const active = useActiveMembership();
   const switchTo = useSwitchAcademy();
@@ -98,10 +112,13 @@ export function AcademySwitcher() {
     return null;
   }
   const canSwitch = viewer.memberships.length > 1;
+  const isBar = variant === "bar";
   const card = (
     <>
-      <BrandMark size={36} />
-      <span className="flex min-w-0 flex-1 flex-col gap-px">
+      <BrandMark size={isBar ? 32 : 36} />
+      <span
+        className={cn("flex min-w-0 flex-col gap-px", isBar ? "" : "flex-1")}
+      >
         <span className="truncate font-semibold text-ink text-sm leading-[18px]">
           {active.academy.name}
         </span>
@@ -110,8 +127,9 @@ export function AcademySwitcher() {
       {canSwitch ? <UpDownChevron /> : null}
     </>
   );
-  const cardClass =
-    "flex w-full items-center gap-[10px] rounded-[14px] border border-line bg-white p-[10px] text-left";
+  const cardClass = isBar
+    ? "flex min-w-0 max-w-[360px] items-center gap-[10px] rounded-[14px] border border-line bg-white py-[6px] pr-3 pl-[6px] text-left"
+    : "flex w-full items-center gap-[10px] rounded-[14px] border border-line bg-white p-[10px] text-left";
 
   if (!canSwitch) {
     return <div className={cardClass}>{card}</div>;
@@ -131,7 +149,7 @@ export function AcademySwitcher() {
         align="start"
         alignOffset={-2}
         className="w-[232px]"
-        sideOffset={16}
+        sideOffset={isBar ? 8 : 16}
       >
         <DropdownMenuGroup>
           <DropdownMenuLabel>Your academies</DropdownMenuLabel>

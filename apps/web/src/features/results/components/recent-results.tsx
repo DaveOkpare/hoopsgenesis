@@ -1,23 +1,31 @@
 import { cn } from "@hoops-genesis/ui/lib/utils";
 
 import type { PastResult } from "@/features/results/queries";
-import {
-  type AthleticData,
-  type ResultTemplate,
-  resultScore,
-} from "@/features/results/templates";
+import { type ResultTemplate, resultScore } from "@/features/results/templates";
 import { formatWeekdayDayMonth } from "@/features/sessions/time";
 
 const SHOWN = 4;
 const MAX_BAR = 50;
 const MIN_BAR = 8;
+const DECIMALS = 100;
+
+/** " s" after seconds, " cm" after centimetres; nothing for counts. */
+function unitSuffix(template: ResultTemplate): string {
+  if (template.metric === "made" || !template.unit) {
+    return "";
+  }
+  return template.unit === "seconds" || template.unit === "s"
+    ? " s"
+    : ` ${template.unit}`;
+}
 
 function bestIndex(results: PastResult[], template: ResultTemplate): number {
   let best = -1;
   results.forEach((r, i) => {
-    const score = resultScore(r.data);
+    const score = resultScore(r.data, template);
+    const previous = results[best];
     const current =
-      best === -1 ? null : resultScore(results[best]?.data as AthleticData);
+      best === -1 || !previous ? null : resultScore(previous.data, template);
     if (
       current === null ||
       (template.better === "higher" ? score > current : score < current)
@@ -42,11 +50,14 @@ export function RecentResults({
 }) {
   const recent = results.slice(-SHOWN);
   const star = bestIndex(recent, template);
-  const scores = [...recent.map((r) => resultScore(r.data)), current ?? 0];
+  const scores = [
+    ...recent.map((r) => resultScore(r.data, template)),
+    current ?? 0,
+  ];
   const ceiling = template.attempts ?? Math.max(...scores, 1);
   const height = (score: number) =>
     Math.max(MIN_BAR, Math.round((score / ceiling) * MAX_BAR));
-  const unit = template.metric === "seconds" ? " s" : "";
+  const unit = unitSuffix(template);
   return (
     <section className="flex flex-col gap-[10px] rounded-md bg-fog px-4 py-[14px]">
       <h2 className="font-semibold text-[13px] text-muted uppercase leading-4 tracking-label">
@@ -57,7 +68,7 @@ export function RecentResults({
       ) : (
         <ol className="flex h-[56px] items-end justify-between">
           {recent.map((result, index) => {
-            const score = resultScore(result.data);
+            const score = resultScore(result.data, template);
             const isBest = index === star;
             return (
               <li
@@ -124,11 +135,13 @@ export function bestNote(
   if (current === null || results.length === 0) {
     return null;
   }
-  const scores = results.map((r) => resultScore(r.data));
+  const scores = results.map((r) => resultScore(r.data, template));
   const best =
     template.better === "higher" ? Math.max(...scores) : Math.min(...scores);
-  const diff = template.better === "higher" ? current - best : best - current;
-  const unit = template.metric === "seconds" ? " s" : "";
+  const raw = template.better === "higher" ? current - best : best - current;
+  // Decimal scores (12.4 s) must not print float noise.
+  const diff = Math.round(raw * DECIMALS) / DECIMALS;
+  const unit = unitSuffix(template);
   if (diff > 0) {
     return { text: `New best by ${diff}${unit}`, tone: "success" };
   }

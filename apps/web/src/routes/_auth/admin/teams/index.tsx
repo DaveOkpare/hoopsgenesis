@@ -52,13 +52,19 @@ function TeamsPage() {
         });
         return;
       }
+      if (next === "join-code") {
+        // A new code for this team: the dialog opens with the team preselected.
+        navigate({
+          to: "/admin/join-codes",
+          search: { new: 1, teamId: team.id },
+        });
+        return;
+      }
       if (next) {
-        // Join codes have no screen of their own yet, so "join-code" and "add-existing"
-        // both land on the new team's page, where students are added.
         navigate({
           to: "/admin/teams/$teamId",
           params: { teamId: team.id },
-          search: next === "add-existing" ? { add: "" } : {},
+          search: { add: "" },
         });
         return;
       }

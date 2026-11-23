@@ -61,10 +61,10 @@ export function CoachChipsInput({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const chosen = value
-    .map((memberId) => candidates.find((c) => c.memberId === memberId))
+    .map((memberId) => candidates.find((c) => c.user.id === memberId))
     .filter((c): c is CoachCandidate => Boolean(c));
   const options = candidates.filter(
-    (c) => !value.includes(c.memberId) && matches(c, query)
+    (c) => !value.includes(c.user.id) && matches(c, query)
   );
   const isOpen = open && options.length > 0;
   const activeOption = options[Math.min(active, options.length - 1)];
@@ -119,7 +119,7 @@ export function CoachChipsInput({
       }
       if (event.key === "Enter" && isOpen && activeOption) {
         event.preventDefault();
-        add(activeOption.memberId);
+        add(activeOption.user.id);
         return;
       }
       if (event.key === "Escape" && isOpen) {
@@ -140,14 +140,14 @@ export function CoachChipsInput({
         {chosen.map((coach) => (
           <span
             className="flex items-center gap-2 rounded-full bg-fog py-[5px] pr-[10px] pl-[5px] text-ink text-sm leading-[18px]"
-            key={coach.memberId}
+            key={coach.user.id}
           >
             <CoachDot name={coach.user.name} />
             {shortName(coach.user.name)}
             <button
               aria-label={`Remove ${coach.user.name}`}
               className="-my-1 -mr-1 cursor-pointer rounded-full px-1 text-ink outline-none hover:bg-white focus-visible:ring-2 focus-visible:ring-ink"
-              data-member-id={coach.memberId}
+              data-member-id={coach.user.id}
               onClick={handleRemove}
               type="button"
             >
@@ -158,7 +158,7 @@ export function CoachChipsInput({
         <input
           aria-activedescendant={
             isOpen && activeOption
-              ? `${listId}-${activeOption.memberId}`
+              ? `${listId}-${activeOption.user.id}`
               : undefined
           }
           aria-autocomplete="list"
@@ -185,7 +185,7 @@ export function CoachChipsInput({
           role="listbox"
         >
           {options.map((option) => {
-            const selected = option.memberId === activeOption?.memberId;
+            const selected = option.user.id === activeOption?.user.id;
             return (
               // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard is handled on the combobox input (aria-activedescendant).
               <div
@@ -194,9 +194,9 @@ export function CoachChipsInput({
                   "flex cursor-pointer items-center gap-[10px] rounded-[10px] px-[10px] py-2",
                   selected ? "bg-fog" : null
                 )}
-                data-member-id={option.memberId}
-                id={`${listId}-${option.memberId}`}
-                key={option.memberId}
+                data-member-id={option.user.id}
+                id={`${listId}-${option.user.id}`}
+                key={option.user.id}
                 onClick={handlePick}
                 onMouseDown={keepFocus}
                 role="option"
@@ -239,7 +239,7 @@ export function CoachPickerPhone({
   labelledBy: string;
 }) {
   const [editing, setEditing] = useState(false);
-  const chosen = candidates.filter((c) => value.includes(c.memberId));
+  const chosen = candidates.filter((c) => value.includes(c.user.id));
   const toggleEditing = useCallback(() => setEditing((v) => !v), []);
   const handleToggle = useCallback(
     (memberId: Id, checked: boolean) => {
@@ -287,8 +287,8 @@ export function CoachPickerPhone({
           {candidates.map((candidate) => (
             <CoachOption
               candidate={candidate}
-              checked={value.includes(candidate.memberId)}
-              key={candidate.memberId}
+              checked={value.includes(candidate.user.id)}
+              key={candidate.user.id}
               onToggle={handleToggle}
             />
           ))}
@@ -308,8 +308,8 @@ function CoachOption({
   onToggle: (memberId: Id, checked: boolean) => void;
 }) {
   const handleChange = useCallback(
-    (next: boolean) => onToggle(candidate.memberId, next),
-    [candidate.memberId, onToggle]
+    (next: boolean) => onToggle(candidate.user.id, next),
+    [candidate.user.id, onToggle]
   );
   return (
     // biome-ignore lint/a11y/noLabelWithoutControl: the Checkbox inside is the control.

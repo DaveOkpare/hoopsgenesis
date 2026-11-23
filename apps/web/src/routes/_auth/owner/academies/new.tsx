@@ -12,9 +12,6 @@ import {
 } from "@/features/owner-academies/queries";
 
 export const Route = createFileRoute("/_auth/owner/academies/new")({
-  /** `?errors=1` validates on load so the error state can be reviewed and linked. */
-  validateSearch: (search: Record<string, unknown>): { errors?: 1 } =>
-    search.errors === 1 || search.errors === "1" ? { errors: 1 } : {},
   loader: ({ context }) =>
     Promise.all([
       context.queryClient.ensureQueryData(platformAcademiesQueryOptions()),
@@ -24,7 +21,6 @@ export const Route = createFileRoute("/_auth/owner/academies/new")({
 });
 
 function NewAcademyPage() {
-  const { errors } = Route.useSearch();
   return (
     <>
       <PageHeader>
@@ -38,7 +34,7 @@ function NewAcademyPage() {
           <PageTitle>New academy</PageTitle>
         </PageHeading>
       </PageHeader>
-      <CreateAcademyForm showErrors={errors === 1} />
+      <CreateAcademyForm />
     </>
   );
 }

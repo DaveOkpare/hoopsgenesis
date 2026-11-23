@@ -19,7 +19,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useCallback } from "react";
 
-import { formatResult } from "@/features/results/templates";
 import { formatWeekdayDayMonth } from "@/features/sessions/time";
 import { AttendanceBar } from "@/features/team-detail/components/attendance";
 import {
@@ -42,9 +41,9 @@ function exportCsv(detail: TeamDetail, monthLabel: string) {
     ["Player", "Attendance", "Last session", "Latest result"],
     ...detail.students.map((s) => [
       s.user.name,
-      `${s.attendancePercent}%`,
-      formatWeekdayDayMonth(s.lastSessionOn),
-      s.latestResult ? formatResult(s.latestResult) : "",
+      s.attendancePercent === null ? "" : `${s.attendancePercent}%`,
+      s.lastSessionOn ? formatWeekdayDayMonth(s.lastSessionOn) : "",
+      s.latestResult ?? "",
     ]),
   ];
   const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n");
@@ -142,7 +141,7 @@ export function TeamMonthCard({
         <TableBody>
           {detail
             ? detail.students.map((student) => (
-                <TableRow className="last:border-b-0" key={student.memberId}>
+                <TableRow className="last:border-b-0" key={student.user.id}>
                   <TableCell>
                     <span className="flex items-center gap-3">
                       <Avatar size={32}>
@@ -159,12 +158,12 @@ export function TeamMonthCard({
                     <AttendanceBar percent={student.attendancePercent} />
                   </TableCell>
                   <TableCell className="text-sm">
-                    {formatWeekdayDayMonth(student.lastSessionOn)}
+                    {student.lastSessionOn
+                      ? formatWeekdayDayMonth(student.lastSessionOn)
+                      : "—"}
                   </TableCell>
                   <TableCell className="text-sm">
-                    {student.latestResult
-                      ? formatResult(student.latestResult)
-                      : "No results yet"}
+                    {student.latestResult ?? "No results yet"}
                   </TableCell>
                 </TableRow>
               ))

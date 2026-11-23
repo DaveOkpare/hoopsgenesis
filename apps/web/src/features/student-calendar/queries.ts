@@ -1,15 +1,16 @@
 import { queryOptions } from "@tanstack/react-query";
 
-import {
-  academyNow,
-  type EventRange,
-  listEvents,
-} from "@/features/student-calendar/api";
+import { type EventRange, listEvents } from "@/features/student-calendar/api";
 import { toDateOnly } from "@/features/student-calendar/dates";
 import type { DateOnly, Id } from "@/features/types";
 import { useActiveMembership } from "@/features/viewer/queries";
+import { appNow } from "@/lib/preview";
 
-export type { StudentEvent } from "@/features/student-calendar/api";
+export type {
+  EventOccurrence,
+  EventRange,
+  StudentEvent,
+} from "@/features/student-calendar/api";
 
 export const studentEventKeys = {
   all: (academyId: Id) => ["academies", academyId, "events"] as const,
@@ -36,7 +37,7 @@ export interface AcademyClock {
 export function useAcademyClock(): AcademyClock {
   const membership = useActiveMembership();
   const timeZone = membership?.academy.timezone ?? "UTC";
-  const now = academyNow();
+  const now = appNow();
   return {
     academyId: membership?.academy.id ?? "",
     now,

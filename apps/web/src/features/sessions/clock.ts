@@ -6,7 +6,7 @@
  */
 import { useSearch } from "@tanstack/react-router";
 
-import { isUiPreview } from "@/lib/preview";
+import { appNow, isUiPreview } from "@/lib/preview";
 
 import { zonedInstant } from "./time";
 
@@ -22,7 +22,7 @@ export function parseAtParam(value: unknown): string | undefined {
 
 export function sessionClock(at?: string): Date {
   if (!isUiPreview) {
-    return new Date();
+    return appNow();
   }
   return zonedInstant(PREVIEW_DATE, at ?? PREVIEW_TIME, PREVIEW_ZONE);
 }

@@ -6,6 +6,7 @@ import {
   Outlet,
   Scripts,
 } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 
 import appCss from "../index.css?url";
 
@@ -31,17 +32,20 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
     ],
   }),
-  component: RootDocument,
+  // The document is the shell, so even an error at the root renders inside <html> with
+  // the styles and the toaster.
+  shellComponent: RootDocument,
+  component: Outlet,
 });
 
-function RootDocument() {
+function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
         <HeadContent />
       </head>
       <body>
-        <Outlet />
+        {children}
         <Toaster position="bottom-center" />
         <Scripts />
       </body>

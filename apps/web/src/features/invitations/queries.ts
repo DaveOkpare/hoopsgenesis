@@ -11,16 +11,19 @@ import {
   acceptInvitation,
   getInvitation,
   getJoinSummary,
-  type InvitationDetails,
 } from "@/features/invitations/api";
 import type { Id } from "@/features/types";
+import { viewerKeys } from "@/features/viewer/queries";
+import { isUiPreview } from "@/lib/preview";
 
 export type {
   InvitationDetails,
+  InvitationLookup,
   JoinSummary,
 } from "@/features/invitations/api";
 
 export const invitationKeys = {
+  all: ["invitations"] as const,
   detail: (invitationId: Id) => ["invitations", invitationId] as const,
   joinSummary: (invitationId: Id) =>
     ["invitations", invitationId, "join-summary"] as const,
@@ -30,6 +33,7 @@ export function invitationQueryOptions(invitationId: Id) {
   return queryOptions({
     queryKey: invitationKeys.detail(invitationId),
     queryFn: () => getInvitation({ invitationId }),
+    retry: false,
   });
 }
 
@@ -40,16 +44,20 @@ export function joinSummaryQueryOptions(invitationId: Id) {
   });
 }
 
-/** Accept after sign-up or sign-in; marks the cached invitation as accepted. */
+/**
+ * Accept after sign-up or sign-in. The person now belongs to an academy, so the viewer
+ * (memberships) and anything read about this invitation are dropped and read again.
+ */
 export function useAcceptInvitation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: acceptInvitation,
-    onSuccess: ({ invitation }) => {
-      queryClient.setQueryData<InvitationDetails | null>(
-        invitationKeys.detail(invitation.id),
-        invitation
-      );
+    onSuccess: () => {
+      // Preview seeds the viewer from the URL; only a real session changes here.
+      if (!isUiPreview) {
+        queryClient.removeQueries({ queryKey: viewerKeys.all });
+      }
+      queryClient.removeQueries({ queryKey: invitationKeys.all });
     },
   });
 }

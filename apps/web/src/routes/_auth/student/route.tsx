@@ -1,11 +1,11 @@
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/app-shell/app-shell";
 import { studentShell } from "@/components/app-shell/nav-config";
+import { myFeesQueryOptions } from "@/features/student-fees/queries";
+import { useActiveMembership } from "@/features/viewer/queries";
 import { hasActiveRole, homePathFor } from "@/features/viewer/selectors";
-
-/** Replace with the student's unpaid fee count when Fees is built. */
-const NAV_COUNTS = { unpaidFees: 1 };
 
 export const Route = createFileRoute("/_auth/student")({
   beforeLoad: ({ context }) => {
@@ -16,9 +16,25 @@ export const Route = createFileRoute("/_auth/student")({
   component: StudentLayout,
 });
 
+/** The Fees badge: 1 while a fee is due, nothing until the fees have loaded. */
+function useStudentNavCounts() {
+  const academyId = useActiveMembership()?.academy.id ?? "";
+  const fees = useQuery({
+    ...myFeesQueryOptions(academyId),
+    enabled: Boolean(academyId),
+    // A failed count must never take down the shell: it just shows no badge.
+    throwOnError: false,
+  });
+  if (!fees.data) {
+    return {};
+  }
+  return { unpaidFees: fees.data.due ? 1 : 0 };
+}
+
 function StudentLayout() {
+  const counts = useStudentNavCounts();
   return (
-    <AppShell config={studentShell} counts={NAV_COUNTS}>
+    <AppShell config={studentShell} counts={counts}>
       <Outlet />
     </AppShell>
   );
