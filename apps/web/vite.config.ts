@@ -13,10 +13,14 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   plugins: [
-    varlockVitePlugin({ ssrInjectMode: "auto-load" }),
+    varlockVitePlugin({ ssrInjectMode: "resolved-env" }),
     tailwindcss(),
     tanstackStart(),
-    nitro({ preset: "node-server" }),
+    nitro(),
     viteReact(),
   ],
+  // These deployments run the standalone build artifact.
+  ssr: {
+    noExternal: true,
+  },
 });

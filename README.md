@@ -89,18 +89,21 @@ Run standalone Node/Bun tools that use Varlock from the owning app directory so 
 
 ## Deployment
 
-### Docker Compose
+### Vercel Services
 
 - Target: web + server
-- Config: `docker-compose.yml` (app Dockerfiles live in `apps/*/Dockerfile`)
-- Build images: pnpm run docker:build
-- Start: pnpm run docker:up
-- Logs: pnpm run docker:logs
-- Stop: pnpm run docker:down
+- Config: `vercel.json`
+- Link the project first: pnpm run deploy:setup
+- Local Vercel dev: pnpm run dev:vercel
+- Sync preview env: pnpm run env:preview
+- Sync production env: pnpm run env:production
+- Dry-run check (no upload): pnpm run deploy:check
+- Preview deploy: pnpm run deploy
+- Production deploy: pnpm run deploy:prod
+  Vercel Services share project environment variables, but deploys do not upload local `.env` files automatically. Link the project with `vercel link`, then run the env sync command before your first deploy (otherwise the deployment starts with no env vars), or pass one-off envs with `vercel deploy -e KEY=value`.
+  Pass Vercel CLI flags to the env sync command directly, for example: `pnpm run env:production --scope your-team`.
 
-Environment variables are read from each app's `.env` file (baked into web builds for public variables) and overridden in `docker-compose.yml` for container networking.
-
-For more details, see the guide on [Deploying with Docker Compose](https://www.better-t-stack.dev/docs/guides/docker).
+For more details, see the guide on [Deploying to Vercel](https://www.better-t-stack.dev/docs/guides/vercel).
 
 ## Project Structure
 
@@ -126,10 +129,13 @@ hoops-genesis/
 - `pnpm run db:generate`: Generate database client/types
 - `pnpm run db:migrate`: Run database migrations
 - `pnpm run db:studio`: Open database studio UI
-- `pnpm run docker:build`: Build the Docker Compose images
-- `pnpm run docker:up`: Build and start the Docker Compose stack
-- `pnpm run docker:logs`: Tail logs from the Docker Compose stack
-- `pnpm run docker:down`: Stop the Docker Compose stack
+- `pnpm run deploy:setup`: Link this repo to a Vercel project (first-time setup)
+- `pnpm run dev:vercel`: Run the Vercel Services dev environment locally
+- `pnpm run env:preview`: Sync local env files to the Vercel preview environment
+- `pnpm run env:production`: Sync local env files to the Vercel production environment
+- `pnpm run deploy`: Create a Vercel preview deployment
+- `pnpm run deploy:prod`: Deploy to Vercel production
+- `pnpm run deploy:check`: Dry-run a deploy to preview framework detection and included files without uploading
 
 ## Better Auth Schema Generation
 
