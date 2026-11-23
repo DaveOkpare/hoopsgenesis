@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "apps/web",
+      "framework": "tanstack-start",
+      "installCommand": "cd ../.. && pnpm install",
+      "buildCommand": "cd ../.. && pnpm run db:generate && cd apps/web && pnpm run build"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    }
+  ]
+}
