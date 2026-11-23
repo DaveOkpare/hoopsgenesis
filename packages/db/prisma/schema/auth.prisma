@@ -1,13 +1,13 @@
 model User {
-  id                     String          @id
+  id                     String                     @id
   name                   String
   email                  String
-  emailVerified          Boolean         @default(false)
+  emailVerified          Boolean                    @default(false)
   image                  String?
-  createdAt              DateTime        @default(now())
-  updatedAt              DateTime        @updatedAt
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
   role                   String?
-  banned                 Boolean?        @default(false)
+  banned                 Boolean?                   @default(false)
   banReason              String?
   banExpires             DateTime?
   phone                  String?
@@ -18,12 +18,22 @@ model User {
   members                Member[]
   invitations            Invitation[]
   // App back-relations (hand-added, see academy.prisma)
-  attendance             Attendance[]    @relation("AttendanceStudent")
-  fees                   Fee[]           @relation("FeeStudent")
-  studentRecords         StudentRecord[] @relation("StudentRecordStudent")
-  recordedStudentRecords StudentRecord[] @relation("StudentRecordRecordedBy")
-  verifiedStudentRecords StudentRecord[] @relation("StudentRecordVerifiedBy")
-  createdCalendarEvents  CalendarEvent[] @relation("CalendarEventCreatedBy")
+  attendance             Attendance[]               @relation("AttendanceStudent")
+  fees                   Fee[]                      @relation("FeeStudent")
+  studentRecords         StudentRecord[]            @relation("StudentRecordStudent")
+  recordedStudentRecords StudentRecord[]            @relation("StudentRecordRecordedBy")
+  verifiedStudentRecords StudentRecord[]            @relation("StudentRecordVerifiedBy")
+  createdCalendarEvents  CalendarEvent[]            @relation("CalendarEventCreatedBy")
+  recordedAttendance     Attendance[]               @relation("AttendanceRecordedBy")
+  verifiedAttendance     Attendance[]               @relation("AttendanceVerifiedBy")
+  voidedAttendance       Attendance[]               @relation("AttendanceVoidedBy")
+  recordedFees           Fee[]                      @relation("FeeRecordedBy")
+  voidedFees             Fee[]                      @relation("FeeVoidedBy")
+  auditLogs              AuditLog[]                 @relation("AuditLogActor")
+  impersonatedAuditLogs  AuditLog[]                 @relation("AuditLogImpersonatedBy")
+  createdInvitationCodes InvitationCode[]           @relation("InvitationCodeCreatedBy")
+  revokedInvitationCodes InvitationCode[]           @relation("InvitationCodeRevokedBy")
+  invitationRedemptions  InvitationCodeRedemption[] @relation("InvitationCodeRedemptionUser")
 
   @@unique([email])
   @@map("user")
@@ -81,40 +91,51 @@ model Verification {
 }
 
 model Organization {
-  id              String          @id
-  name            String
-  slug            String
-  logo            String?
-  createdAt       DateTime
-  metadata        String?
-  location        String?
-  timezone        String
-  defaultCurrency String
-  teams           Team[]
-  members         Member[]
-  invitations     Invitation[]
+  id                String           @id
+  name              String
+  slug              String
+  logo              String?
+  createdAt         DateTime
+  metadata          String?
+  location          String?
+  timezone          String
+  defaultCurrency   String
+  // Hand-edited: Better Auth generates `number` fields as Int, but coordinates
+  // need Float (double precision), and qrNonce is NOT NULL (the create hook
+  // always sets it). The generator keeps both edits. attendanceRadiusM stays
+  // nullable because the generator resets it; the hooks never store null.
+  latitude          Float
+  longitude         Float
+  attendanceRadiusM Int?             @default(150)
+  qrNonce           String
+  teams             Team[]
+  members           Member[]
+  invitations       Invitation[]
   // App back-relations (hand-added, see academy.prisma)
-  attendance      Attendance[]    @relation("AttendanceAcademy")
-  fees            Fee[]           @relation("FeeAcademy")
-  studentRecords  StudentRecord[] @relation("StudentRecordAcademy")
-  calendarEvents  CalendarEvent[] @relation("CalendarEventAcademy")
+  attendance        Attendance[]     @relation("AttendanceAcademy")
+  fees              Fee[]            @relation("FeeAcademy")
+  studentRecords    StudentRecord[]  @relation("StudentRecordAcademy")
+  calendarEvents    CalendarEvent[]  @relation("CalendarEventAcademy")
+  auditLogs         AuditLog[]       @relation("AuditLogAcademy")
+  invitationCodes   InvitationCode[] @relation("InvitationCodeAcademy")
 
   @@unique([slug])
   @@map("organization")
 }
 
 model Team {
-  id             String          @id
-  name           String
-  memberCount    Int             @default(0)
-  organizationId String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime
-  updatedAt      DateTime?       @updatedAt
-  ageGroup       String?
-  teammembers    TeamMember[]
+  id              String           @id
+  name            String
+  memberCount     Int              @default(0)
+  organizationId  String
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt       DateTime
+  updatedAt       DateTime?        @updatedAt
+  ageGroup        String?
+  teammembers     TeamMember[]
   // App back-relation (hand-added, see academy.prisma)
-  calendarEvents CalendarEvent[] @relation("TeamCalendarEvents")
+  calendarEvents  CalendarEvent[]  @relation("TeamCalendarEvents")
+  invitationCodes InvitationCode[] @relation("TeamInvitationCodes")
 
   @@unique([id, organizationId], map: "team_id_org_uq")
   @@index([organizationId])
