@@ -1,28 +1,47 @@
 model User {
-  id            String    @id
-  name          String
-  email         String
-  emailVerified Boolean   @default(false)
-  image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  sessions      Session[]
-  accounts      Account[]
+  id                     String          @id
+  name                   String
+  email                  String
+  emailVerified          Boolean         @default(false)
+  image                  String?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  role                   String?
+  banned                 Boolean?        @default(false)
+  banReason              String?
+  banExpires             DateTime?
+  phone                  String?
+  dateOfBirth            DateTime?
+  sessions               Session[]
+  accounts               Account[]
+  teammembers            TeamMember[]
+  members                Member[]
+  invitations            Invitation[]
+  // App back-relations (hand-added, see academy.prisma)
+  attendance             Attendance[]    @relation("AttendanceStudent")
+  fees                   Fee[]           @relation("FeeStudent")
+  studentRecords         StudentRecord[] @relation("StudentRecordStudent")
+  recordedStudentRecords StudentRecord[] @relation("StudentRecordRecordedBy")
+  verifiedStudentRecords StudentRecord[] @relation("StudentRecordVerifiedBy")
+  createdCalendarEvents  CalendarEvent[] @relation("CalendarEventCreatedBy")
 
   @@unique([email])
   @@map("user")
 }
 
 model Session {
-  id        String   @id
-  expiresAt DateTime
-  token     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  ipAddress String?
-  userAgent String?
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                   String   @id
+  expiresAt            DateTime
+  token                String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  ipAddress            String?
+  userAgent            String?
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impersonatedBy       String?
+  activeOrganizationId String?
+  activeTeamId         String?
 
   @@unique([token])
   @@index([userId])
@@ -59,4 +78,95 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
+}
+
+model Organization {
+  id              String          @id
+  name            String
+  slug            String
+  logo            String?
+  createdAt       DateTime
+  metadata        String?
+  location        String?
+  timezone        String
+  defaultCurrency String
+  teams           Team[]
+  members         Member[]
+  invitations     Invitation[]
+  // App back-relations (hand-added, see academy.prisma)
+  attendance      Attendance[]    @relation("AttendanceAcademy")
+  fees            Fee[]           @relation("FeeAcademy")
+  studentRecords  StudentRecord[] @relation("StudentRecordAcademy")
+  calendarEvents  CalendarEvent[] @relation("CalendarEventAcademy")
+
+  @@unique([slug])
+  @@map("organization")
+}
+
+model Team {
+  id             String          @id
+  name           String
+  memberCount    Int             @default(0)
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime
+  updatedAt      DateTime?       @updatedAt
+  ageGroup       String?
+  teammembers    TeamMember[]
+  // App back-relation (hand-added, see academy.prisma)
+  calendarEvents CalendarEvent[] @relation("TeamCalendarEvents")
+
+  @@unique([id, organizationId], map: "team_id_org_uq")
+  @@index([organizationId])
+  @@map("team")
+}
+
+model TeamMember {
+  id            String    @id
+  teamId        String
+  team          Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  membershipKey String?
+  createdAt     DateTime?
+
+  @@unique([membershipKey])
+  @@unique([teamId, userId], map: "team_member_team_user_uq")
+  @@index([teamId])
+  @@index([userId])
+  @@map("teamMember")
+}
+
+model Member {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String       @default("member")
+  createdAt      DateTime
+
+  @@unique([organizationId, userId], map: "member_org_user_uq")
+  @@index([organizationId])
+  @@index([userId])
+  @@map("member")
+}
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           String?
+  teamId         String?
+  status         String       @default("pending")
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  inviterId      String
+  user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, status], map: "invitation_org_status_idx")
+  @@index([email])
+  @@map("invitation")
 }

@@ -1,0 +1,147 @@
+// App tables for the academy platform. Better Auth's tables live in auth.prisma.
+//
+// Ids: Better Auth uses its default string ids (text columns), so every FK to
+// user, organization or team is text. App-table ids are text too, generated
+// by Prisma Client with cuid() (no database default).
+//
+// Rules this schema language cannot express are added by hand in the first
+// migration (CHECK constraints). Prisma does not track CHECK constraints, so
+// they never show up as drift.
+//
+// Every relation is named. The Better Auth CLI misreads unnamed list
+// back-relations in auth.prisma as required columns and prints false warnings.
+//
+// onDelete choices:
+// - fee, student_record: Restrict on every foreign key (money and records are
+//   history; ban users or remove memberships instead of deleting).
+// - attendance: Cascade from academy and student (day-to-day data that should
+//   not block a deliberate delete; fees and records already block it).
+// - calendar_event: Cascade from academy and team (a team event has no meaning
+//   without its team; SET NULL would turn it into an academy-wide event),
+//   Restrict from created_by (keep the author; ban instead of deleting).
+
+enum AttendanceStatus {
+  present
+  absent
+  late
+  excused
+
+  @@map("attendance_status")
+}
+
+enum StudentRecordType {
+  academic
+  athletic
+
+  @@map("student_record_type")
+}
+
+enum StudentRecordStatus {
+  pending
+  verified
+  rejected
+
+  @@map("student_record_status")
+}
+
+/// One row per student per academy per day.
+/// CHECK attendance_check_out_after_check_in (migration SQL).
+model Attendance {
+  id          String           @id @default(cuid())
+  academyId   String           @map("academy_id")
+  academy     Organization     @relation("AttendanceAcademy", fields: [academyId], references: [id], onDelete: Cascade, map: "attendance_academy_id_fkey")
+  studentId   String           @map("student_id")
+  student     User             @relation("AttendanceStudent", fields: [studentId], references: [id], onDelete: Cascade, map: "attendance_student_id_fkey")
+  sessionDate DateTime         @map("session_date") @db.Date
+  status      AttendanceStatus
+  checkInAt   DateTime?        @map("check_in_at") @db.Timestamptz
+  checkOutAt  DateTime?        @map("check_out_at") @db.Timestamptz
+  notes       String?
+
+  @@unique([academyId, studentId, sessionDate], map: "attendance_academy_student_day_uq")
+  @@index([academyId, sessionDate], map: "attendance_academy_date_idx")
+  @@index([studentId], map: "attendance_student_idx")
+  @@map("attendance")
+}
+
+/// A payment. A row exists only once a fee has been paid.
+/// CHECK fee_amount_positive, fee_period_valid (migration SQL).
+model Fee {
+  id               String       @id @default(cuid())
+  studentId        String       @map("student_id")
+  student          User         @relation("FeeStudent", fields: [studentId], references: [id], onDelete: Restrict, map: "fee_student_id_fkey")
+  academyId        String       @map("academy_id")
+  academy          Organization @relation("FeeAcademy", fields: [academyId], references: [id], onDelete: Restrict, map: "fee_academy_id_fkey")
+  description      String
+  periodStart      DateTime     @map("period_start") @db.Date
+  periodEnd        DateTime     @map("period_end") @db.Date
+  amount           Decimal      @db.Decimal(14, 2)
+  currency         String       @db.Char(3)
+  paidAt           DateTime     @map("paid_at") @db.Timestamptz
+  paymentMethod    String?      @map("payment_method")
+  paymentReference String?      @unique(map: "fee_payment_ref_uq") @map("payment_reference")
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([studentId, academyId, periodStart], map: "fee_student_period_uq")
+  @@index([academyId, periodStart], map: "fee_academy_period_idx")
+  @@map("fee")
+}
+
+/// An academic or athletic record about a student.
+/// CHECK student_record_verified_by_matches_status (migration SQL).
+model StudentRecord {
+  id            String              @id @default(cuid())
+  academyId     String              @map("academy_id")
+  academy       Organization        @relation("StudentRecordAcademy", fields: [academyId], references: [id], onDelete: Restrict, map: "student_record_academy_id_fkey")
+  studentId     String              @map("student_id")
+  student       User                @relation("StudentRecordStudent", fields: [studentId], references: [id], onDelete: Restrict, map: "student_record_student_id_fkey")
+  recordType    StudentRecordType   @map("record_type")
+  recordedById  String              @map("recorded_by")
+  recordedBy    User                @relation("StudentRecordRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict, map: "student_record_recorded_by_fkey")
+  recordedOn    DateTime            @map("recorded_on") @db.Date
+  /// Validated in the app per recordType + schemaVersion.
+  data          Json                @default("{}") @db.JsonB
+  schemaVersion Int                 @default(1) @map("schema_version")
+  /// Storage key of the upload, not a public URL.
+  fileUrl       String?             @map("file_url")
+  status        StudentRecordStatus @default(pending)
+  verifiedById  String?             @map("verified_by")
+  verifiedBy    User?               @relation("StudentRecordVerifiedBy", fields: [verifiedById], references: [id], onDelete: Restrict, map: "student_record_verified_by_fkey")
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([academyId, studentId, recordType, recordedOn(sort: Desc)], map: "student_record_history_idx")
+  @@index([academyId, createdAt], map: "student_record_pending_idx", where: raw("status = 'pending'"))
+  @@index([studentId], map: "student_record_student_idx")
+  @@index([recordedById], map: "student_record_recorded_by_idx")
+  @@index([verifiedById], map: "student_record_verified_by_idx")
+  @@index([data(ops: JsonbPathOps)], type: Gin, map: "student_record_data_gin")
+  @@map("student_record")
+}
+
+/// An academy-wide event (teamId null) or a team event.
+/// CHECK calendar_event_ends_after_starts (migration SQL).
+model CalendarEvent {
+  id          String       @id @default(cuid())
+  academyId   String       @map("academy_id")
+  academy     Organization @relation("CalendarEventAcademy", fields: [academyId], references: [id], onDelete: Cascade, map: "calendar_event_academy_id_fkey")
+  teamId      String?      @map("team_id")
+  /// Composite FK: a team event's team must belong to the event's academy.
+  team        Team?        @relation("TeamCalendarEvents", fields: [teamId, academyId], references: [id, organizationId], onDelete: Cascade, map: "calendar_event_team_same_academy")
+  /// Free text; allowed values live in app config.
+  eventType   String       @map("event_type")
+  title       String
+  description String?
+  location    String?
+  startsAt    DateTime     @map("starts_at") @db.Timestamptz
+  endsAt      DateTime     @map("ends_at") @db.Timestamptz
+  allDay      Boolean      @default(false) @map("all_day")
+  createdById String       @map("created_by")
+  createdBy   User         @relation("CalendarEventCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "calendar_event_created_by_fkey")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([academyId, startsAt], map: "calendar_event_academy_starts_idx")
+  @@index([teamId, startsAt], map: "calendar_event_team_starts_idx", where: raw("team_id IS NOT NULL"))
+  @@index([createdById], map: "calendar_event_created_by_idx")
+  @@map("calendar_event")
+}

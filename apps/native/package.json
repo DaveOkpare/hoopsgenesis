@@ -16,6 +16,7 @@
     "@better-auth/expo": "catalog:",
     "@expo/ui": "~58.0.19",
     "@expo/vector-icons": "^15.0.2",
+    "@hoops-genesis/auth": "workspace:*",
     "@tanstack/react-form": "catalog:",
     "@tanstack/react-query": "^5.102.8",
     "@varlock/expo-integration": "1.2.2",
