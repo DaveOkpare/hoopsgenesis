@@ -1,16 +1,29 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 
 import Loader from "./components/loader";
+import { NotFound } from "./components/not-found";
 import { routeTree } from "./routeTree.gen";
 
+const ONE_MINUTE = 60_000;
+
 export const getRouter = () => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { staleTime: ONE_MINUTE, retry: 1 },
+    },
+  });
+
   const router = createTanStackRouter({
     routeTree,
     scrollRestoration: true,
     defaultPreloadStaleTime: 0,
-    context: {},
+    context: { queryClient },
     defaultPendingComponent: () => <Loader />,
-    defaultNotFoundComponent: () => <div>Not Found</div>,
+    defaultNotFoundComponent: () => <NotFound />,
+    Wrap: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
   });
 
   return router;

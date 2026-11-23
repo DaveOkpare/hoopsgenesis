@@ -1,55 +1,74 @@
 import { cn } from "@hoops-genesis/ui/lib/utils";
-import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import type * as React from "react";
+
+/*
+ * Panels from the app screens. 20px radius, 24px padding.
+ * - default: white with hairline ("Needs your attention", "Unpaid for November")
+ * - fog: no border ("Your academy", owner detail panel, "Records waiting for you")
+ * - ink: black ("Today's sessions", student "Next session")
+ * - soft: orange-soft ("November fee", invite banner)
+ * Stat tiles have their own component (stat.tsx).
+ */
+const cardVariants = cva("group flex flex-col rounded-[20px] p-6", {
+  variants: {
+    variant: {
+      default: "border border-line bg-white text-ink",
+      fog: "bg-fog text-ink",
+      ink: "bg-ink text-white",
+      soft: "bg-orange-soft text-ink",
+    },
+  },
+  defaultVariants: { variant: "default" },
+});
 
 function Card({
   className,
-  size = "default",
+  variant = "default",
   ...props
-}: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+}: React.ComponentProps<"section"> & VariantProps<typeof cardVariants>) {
   return (
-    <div
+    <section
+      className={cn(cardVariants({ variant }), className)}
       data-slot="card"
-      data-size={size}
-      className={cn(
-        "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-none bg-card py-(--card-spacing) text-xs/relaxed text-card-foreground ring-1 ring-foreground/10 [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-none *:[img:last-child]:rounded-none",
-        className,
-      )}
+      data-variant={variant}
       {...props}
     />
   );
 }
 
+/** Title row: title/description on the left, actions (<CardAction>) on the right. */
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
+      className={cn("flex items-center justify-between gap-4 pb-3", className)}
       data-slot="card-header"
-      className={cn(
-        "group/card-header @container/card-header grid auto-rows-min items-start gap-1 rounded-none px-(--card-spacing) has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-description]:grid-rows-[auto_auto] [.border-b]:pb-(--card-spacing)",
-        className,
-      )}
       {...props}
     />
   );
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+function CardTitle({ className, ...props }: React.ComponentProps<"h2">) {
   return (
-    <div
+    <h2
+      className={cn(
+        "font-semibold text-lg leading-[22px] tracking-display",
+        className
+      )}
       data-slot="card-title"
-      className={cn(
-        "cn-font-heading text-sm font-medium group-data-[size=sm]/card:text-sm",
-        className,
-      )}
       {...props}
     />
   );
 }
 
-function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
+function CardDescription({ className, ...props }: React.ComponentProps<"p">) {
   return (
-    <div
+    <p
+      className={cn(
+        "text-muted text-sm leading-[18px] group-data-[variant=ink]:text-white/70",
+        className
+      )}
       data-slot="card-description"
-      className={cn("text-xs/relaxed text-muted-foreground", className)}
       {...props}
     />
   );
@@ -58,8 +77,8 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
 function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
+      className={cn("flex shrink-0 items-center gap-2", className)}
       data-slot="card-action"
-      className={cn("col-start-2 row-span-2 row-start-1 self-start justify-self-end", className)}
       {...props}
     />
   );
@@ -67,18 +86,35 @@ function CardAction({ className, ...props }: React.ComponentProps<"div">) {
 
 function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <div data-slot="card-content" className={cn("px-(--card-spacing)", className)} {...props} />
-  );
-}
-
-function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
-  return (
     <div
-      data-slot="card-footer"
-      className={cn("flex items-center rounded-none border-t p-(--card-spacing)", className)}
+      className={cn("flex flex-col", className)}
+      data-slot="card-content"
       {...props}
     />
   );
 }
 
-export { Card, CardHeader, CardFooter, CardTitle, CardAction, CardDescription, CardContent };
+/** "Showing 4 of 14 · View all unpaid" row under a table. */
+function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between border-line border-t pt-[14px] text-muted text-sm leading-[18px]",
+        className
+      )}
+      data-slot="card-footer"
+      {...props}
+    />
+  );
+}
+
+export {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+  cardVariants,
+};

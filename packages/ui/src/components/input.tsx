@@ -1,19 +1,35 @@
 import { Input as InputPrimitive } from "@base-ui/react/input";
 import { cn } from "@hoops-genesis/ui/lib/utils";
-import * as React from "react";
+import type * as React from "react";
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+/**
+ * Fog field from the app screens: 46px tall (`lg`: 52px, used on sign-in).
+ * A transparent 2px border turns ink on focus, so focus never shifts layout.
+ */
+const inputBase =
+  "w-full min-w-0 rounded-[14px] border-2 border-transparent bg-fog text-ink transition-colors outline-none placeholder:text-muted focus-visible:border-ink focus-visible:bg-white disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-orange-deep aria-invalid:bg-white";
+
+const inputSizes = {
+  default: "px-[14px] py-3 text-[15px] leading-[18px]",
+  lg: "px-4 py-3.5 text-base leading-5",
+} as const;
+
+function Input({
+  className,
+  type,
+  size = "default",
+  ...props
+}: Omit<React.ComponentProps<"input">, "size"> & {
+  size?: keyof typeof inputSizes;
+}) {
   return (
     <InputPrimitive
-      type={type}
+      className={cn(inputBase, inputSizes[size], className)}
       data-slot="input"
-      className={cn(
-        "h-8 w-full min-w-0 rounded-none border border-input bg-transparent px-2.5 py-1 text-xs transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-xs file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-1 aria-invalid:ring-destructive/20 md:text-xs dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
-        className,
-      )}
+      type={type}
       {...props}
     />
   );
 }
 
-export { Input };
+export { Input, inputBase };

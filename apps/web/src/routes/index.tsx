@@ -1,34 +1,55 @@
 import { createFileRoute } from "@tanstack/react-router";
+import z from "zod";
 
-export const Route = createFileRoute("/")({
-  component: HomeComponent,
+import { Cities } from "@/components/landing/cities";
+import { Footer } from "@/components/landing/footer";
+import { Hero } from "@/components/landing/hero";
+import { Partners } from "@/components/landing/partners";
+import { Programs } from "@/components/landing/programs";
+import { Reasons } from "@/components/landing/reasons";
+
+const TITLE =
+  "Hoops Genesis · Basketball & football academies, courts and leagues";
+const DESCRIPTION =
+  "Basketball & football academies, courts and leagues in India, Rwanda and Uganda.";
+
+/** `menu=open`: opens the phone/tablet menu on load (Paper K8-0), for deep links and screenshots. */
+const searchSchema = z.object({
+  menu: z.literal("open").optional().catch(undefined),
 });
 
-const TITLE_TEXT = `
- ██████╗ ███████╗████████╗████████╗███████╗██████╗
- ██╔══██╗██╔════╝╚══██╔══╝╚══██╔══╝██╔════╝██╔══██╗
- ██████╔╝█████╗     ██║      ██║   █████╗  ██████╔╝
- ██╔══██╗██╔══╝     ██║      ██║   ██╔══╝  ██╔══██╗
- ██████╔╝███████╗   ██║      ██║   ███████╗██║  ██║
- ╚═════╝ ╚══════╝   ╚═╝      ╚═╝   ╚══════╝╚═╝  ╚═╝
+export const Route = createFileRoute("/")({
+  validateSearch: searchSchema,
+  head: () => ({
+    meta: [
+      { title: TITLE },
+      { name: "description", content: DESCRIPTION },
+      { property: "og:title", content: TITLE },
+      { property: "og:description", content: DESCRIPTION },
+      { property: "og:type", content: "website" },
+      { name: "theme-color", content: "#111111" },
+    ],
+  }),
+  component: LandingPage,
+});
 
- ████████╗    ███████╗████████╗ █████╗  ██████╗██╗  ██╗
- ╚══██╔══╝    ██╔════╝╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝
-    ██║       ███████╗   ██║   ███████║██║     █████╔╝
-    ██║       ╚════██║   ██║   ██╔══██║██║     ██╔═██╗
-    ██║       ███████║   ██║   ██║  ██║╚██████╗██║  ██╗
-    ╚═╝       ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝
- `;
+/*
+ * Public landing page, Paper page p-2-0: 8I-0 (1440), QD-0 (1024), L3-0 (768),
+ * FR-0 (390), K8-0 (390, menu open). Own layout, no app shell.
+ */
+function LandingPage() {
+  const { menu } = Route.useSearch();
 
-function HomeComponent() {
   return (
-    <div className="container mx-auto max-w-3xl px-4 py-2">
-      <pre className="overflow-x-auto font-mono text-sm">{TITLE_TEXT}</pre>
-      <div className="grid gap-6">
-        <section className="rounded-lg border p-4">
-          <h2 className="mb-2 font-medium">API Status</h2>
-        </section>
-      </div>
-    </div>
+    <>
+      <main>
+        <Hero defaultMenuOpen={menu === "open"} />
+        <Partners />
+        <Reasons />
+        <Cities />
+        <Programs />
+      </main>
+      <Footer />
+    </>
   );
 }

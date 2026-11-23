@@ -1,0 +1,175 @@
+/*
+ * MOCK-DATA CONVENTION (copy this for every feature)
+ *
+ *   src/features/<feature>/api.ts      typed async functions, one per endpoint. Today they
+ *                                      return fixtures; later they call the real endpoint.
+ *                                      Swapping in the real API is a change to this file only.
+ *   src/features/<feature>/queries.ts  TanStack Query `queryOptions` + mutation hooks that
+ *                                      call api.ts. Components only import from here.
+ *
+ * Rules:
+ * - Names and shapes mirror "API endpoints.md" (camelCase, ISO dates, money as strings).
+ *   Shared types live in src/features/types.ts; feature-only types live in api.ts.
+ * - Fixtures come from src/features/fixtures.ts (same people as the designs). Never import
+ *   fixtures from components.
+ * - Await `fixtureDelay()` so loading states are real.
+ * - Mutations return what the real endpoint returns; queries.ts updates or invalidates the cache.
+ * - Academy-scoped query keys start with ["academies", academyId, "<resource>", ...params].
+ */
+import {
+  academies,
+  fixtureDelay,
+  members,
+  teams,
+  users,
+} from "@/features/fixtures";
+import type {
+  Academy,
+  AcademyRole,
+  Id,
+  Team,
+  Timestamp,
+  User,
+  UserSummary,
+} from "@/features/types";
+
+export interface Membership {
+  academy: Academy;
+  roles: AcademyRole[];
+  /** Teams this person is on (coach: teams they coach; student: their team). */
+  teams: Pick<Team, "id" | "name">[];
+}
+
+/** Set while the owner is "viewing as" someone (Better Auth admin impersonation). */
+export interface Impersonation {
+  by: UserSummary;
+  startedAt: Timestamp;
+}
+
+/** Everything the app chrome needs about the signed-in person. */
+export interface Viewer {
+  /** session.activeOrganizationId */
+  activeAcademyId: Id | null;
+  impersonation: Impersonation | null;
+  memberships: Membership[];
+  user: User;
+}
+
+/** Who to show in preview mode, picked from the URL (see src/lib/preview.ts). */
+export type ViewerPersona = "admin" | "owner" | "coach" | "student";
+
+function findUser(id: string): User {
+  const found = users.find((u) => u.id === id);
+  if (!found) {
+    throw new Error(`Fixture user ${id} is missing`);
+  }
+  return found;
+}
+
+function membershipsFor(userId: string): Membership[] {
+  return members
+    .filter((m) => m.userId === userId)
+    .flatMap((m) => {
+      const academy = academies.find((a) => a.id === m.academyId);
+      if (!academy) {
+        return [];
+      }
+      const memberTeams = teams
+        .filter((t) => m.teamIds.includes(t.id))
+        .map(({ id, name }) => ({ id, name }));
+      return [{ academy, roles: m.roles, teams: memberTeams }];
+    });
+}
+
+/** Owner "view as" in preview mode (`?impersonating=1`); null otherwise. */
+function previewImpersonation(options: {
+  impersonating?: boolean;
+}): Impersonation | null {
+  if (!options.impersonating) {
+    return null;
+  }
+  const innocent = findUser("user-innocent");
+  return {
+    by: {
+      id: innocent.id,
+      name: innocent.name,
+      email: innocent.email,
+      image: null,
+    },
+    startedAt: "2026-11-23T08:02:00Z",
+  };
+}
+
+/** Fixture viewer for each persona; mirrors the people in the designs. */
+export function fixtureViewer(
+  persona: ViewerPersona,
+  options: { impersonating?: boolean } = {}
+): Viewer {
+  switch (persona) {
+    case "owner":
+      return {
+        user: findUser("user-innocent"),
+        memberships: [],
+        activeAcademyId: null,
+        impersonation: null,
+      };
+    case "coach":
+      return {
+        user: findUser("user-sharika"),
+        memberships: membershipsFor("user-sharika")
+          .filter((m) => m.academy.id === "acad-kigali")
+          .map((m) => ({ ...m, roles: ["coach"] })),
+        activeAcademyId: "acad-kigali",
+        impersonation: previewImpersonation(options),
+      };
+    case "student":
+      return {
+        user: findUser("user-aline"),
+        memberships: membershipsFor("user-aline"),
+        activeAcademyId: "acad-kigali",
+        impersonation: previewImpersonation(options),
+      };
+    default: {
+      const innocent = findUser("user-innocent");
+      return {
+        user: findUser("user-sharika"),
+        memberships: membershipsFor("user-sharika"),
+        activeAcademyId: "acad-kigali",
+        impersonation: options.impersonating
+          ? {
+              by: {
+                id: innocent.id,
+                name: innocent.name,
+                email: innocent.email,
+                image: null,
+              },
+              startedAt: "2026-11-23T08:02:00Z",
+            }
+          : null,
+      };
+    }
+  }
+}
+
+/**
+ * The signed-in person, their academies and the active academy.
+ * Real: `authClient.getSession()` (user, session.activeOrganizationId, impersonatedBy)
+ * + `authClient.organization.list()` + `organization.getActiveMember()` per academy.
+ */
+export async function fetchViewer(): Promise<Viewer> {
+  await fixtureDelay();
+  return fixtureViewer("admin");
+}
+
+/** Real: `authClient.organization.setActive({ organizationId })`. */
+export async function setActiveAcademy(input: {
+  academyId: Id;
+}): Promise<{ activeAcademyId: Id }> {
+  await fixtureDelay();
+  return { activeAcademyId: input.academyId };
+}
+
+/** Real: `authClient.admin.stopImpersonating()`. */
+export async function stopImpersonating(): Promise<void> {
+  await fixtureDelay();
+}
