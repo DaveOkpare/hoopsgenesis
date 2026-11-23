@@ -2,11 +2,12 @@
 //
 // Ids: Better Auth uses its default string ids (text columns), so every FK to
 // user, organization or team is text. App-table ids are text too, generated
-// by Prisma Client with cuid() (no database default).
+// by Prisma Client with cuid() (no database default). audit_log.entity_id is
+// text for the same reason.
 //
-// Rules this schema language cannot express are added by hand in the first
-// migration (CHECK constraints). Prisma does not track CHECK constraints, so
-// they never show up as drift.
+// Rules this schema language cannot express are added by hand in the
+// migrations (CHECK constraints, the audit_log append-only trigger). Prisma
+// does not track CHECK constraints or triggers, so they never show up as drift.
 //
 // Every relation is named. The Better Auth CLI misreads unnamed list
 // back-relations in auth.prisma as required columns and prints false warnings.
@@ -16,9 +17,25 @@
 //   history; ban users or remove memberships instead of deleting).
 // - attendance: Cascade from academy and student (day-to-day data that should
 //   not block a deliberate delete; fees and records already block it).
+//   NoAction from event and from recorded_by / verified_by / voided_by: an
+//   event with attendance, or a coach who recorded, verified or voided
+//   attendance, cannot be deleted. NoAction (checked at the end of the
+//   statement) instead of Restrict, so deleting an academy, or a student who
+//   recorded their own QR scans, still cascades cleanly.
 // - calendar_event: Cascade from academy and team (a team event has no meaning
 //   without its team; SET NULL would turn it into an academy-wide event),
 //   Restrict from created_by (keep the author; ban instead of deleting).
+// - invitation_code: Cascade from academy (deleting an academy takes its
+//   codes; every code's creation is audited with academy_id, so an academy
+//   with codes already has history and cannot be deleted anyway) and from
+//   team (same-academy composite FK; a team code means nothing without its
+//   team). Restrict from created_by and revoked_by (both are audited too).
+// - invitation_code_redemption: Cascade from the code and from the user (the
+//   membership and the member.join_by_code audit row are the lasting record;
+//   that audit row already keeps the user from being deleted).
+// - audit_log: Restrict from academy, actor and impersonated_by. The append-only trigger
+//   rejects the UPDATE / DELETE that SET NULL or CASCADE would need anyway, so
+//   an academy or user with audit rows cannot be deleted.
 
 enum AttendanceStatus {
   present
@@ -44,28 +61,51 @@ enum StudentRecordStatus {
   @@map("student_record_status")
 }
 
-/// One row per student per academy per day.
-/// CHECK attendance_check_out_after_check_in (migration SQL).
+/// One row per student per session (event + date). Voided rows stay but are
+/// ignored; the unique index skips them so a correction can be recorded.
+/// CHECK attendance_check_out_after_check_in, attendance_verified_together,
+/// attendance_void_all_or_nothing (migration SQL).
 model Attendance {
-  id          String           @id @default(cuid())
-  academyId   String           @map("academy_id")
-  academy     Organization     @relation("AttendanceAcademy", fields: [academyId], references: [id], onDelete: Cascade, map: "attendance_academy_id_fkey")
-  studentId   String           @map("student_id")
-  student     User             @relation("AttendanceStudent", fields: [studentId], references: [id], onDelete: Cascade, map: "attendance_student_id_fkey")
-  sessionDate DateTime         @map("session_date") @db.Date
-  status      AttendanceStatus
-  checkInAt   DateTime?        @map("check_in_at") @db.Timestamptz
-  checkOutAt  DateTime?        @map("check_out_at") @db.Timestamptz
-  notes       String?
+  id                String           @id @default(cuid())
+  academyId         String           @map("academy_id")
+  academy           Organization     @relation("AttendanceAcademy", fields: [academyId], references: [id], onDelete: Cascade, map: "attendance_academy_id_fkey")
+  eventId           String           @map("event_id")
+  /// Composite FK: the event must belong to the attendance row's academy.
+  event             CalendarEvent    @relation("CalendarEventAttendance", fields: [eventId, academyId], references: [id, academyId], onDelete: NoAction, map: "attendance_event_same_academy")
+  /// The session's date in the academy's time zone; must be a session of the event (app check).
+  sessionDate       DateTime         @map("session_date") @db.Date
+  studentId         String           @map("student_id")
+  student           User             @relation("AttendanceStudent", fields: [studentId], references: [id], onDelete: Cascade, map: "attendance_student_id_fkey")
+  status            AttendanceStatus
+  checkInAt         DateTime?        @map("check_in_at") @db.Timestamptz
+  checkOutAt        DateTime?        @map("check_out_at") @db.Timestamptz
+  /// Distance from the academy at a QR check-in, in metres; raw coordinates are not stored.
+  checkInDistanceM  Int?             @map("check_in_distance_m")
+  checkOutDistanceM Int?             @map("check_out_distance_m")
+  notes             String?
+  /// Coach for manual entries; the student for QR scans. Taken from the session.
+  recordedById      String           @map("recorded_by")
+  recordedBy        User             @relation("AttendanceRecordedBy", fields: [recordedById], references: [id], onDelete: NoAction, map: "attendance_recorded_by_fkey")
+  /// Coach's checkmark: saw the student in person.
+  verifiedAt        DateTime?        @map("verified_at") @db.Timestamptz
+  verifiedById      String?          @map("verified_by")
+  verifiedBy        User?            @relation("AttendanceVerifiedBy", fields: [verifiedById], references: [id], onDelete: NoAction, map: "attendance_verified_by_fkey")
+  voidedAt          DateTime?        @map("voided_at") @db.Timestamptz
+  voidedById        String?          @map("voided_by")
+  voidedBy          User?            @relation("AttendanceVoidedBy", fields: [voidedById], references: [id], onDelete: NoAction, map: "attendance_voided_by_fkey")
+  voidReason        String?          @map("void_reason")
 
-  @@unique([academyId, studentId, sessionDate], map: "attendance_academy_student_day_uq")
+  @@unique([eventId, studentId, sessionDate], map: "attendance_event_student_session_uq", where: raw("voided_at IS NULL"))
+  @@index([eventId, sessionDate], map: "attendance_event_session_idx")
   @@index([academyId, sessionDate], map: "attendance_academy_date_idx")
   @@index([studentId], map: "attendance_student_idx")
   @@map("attendance")
 }
 
-/// A payment. A row exists only once a fee has been paid.
-/// CHECK fee_amount_positive, fee_period_valid (migration SQL).
+/// A fee owed by a student. Paid = paidAt set; overdue = unpaid and past
+/// dueDate; waived or cancelled = voided. There is no status column.
+/// CHECK fee_amount_positive, fee_period_valid, fee_void_all_or_nothing
+/// (migration SQL).
 model Fee {
   id               String       @id @default(cuid())
   studentId        String       @map("student_id")
@@ -77,12 +117,22 @@ model Fee {
   periodEnd        DateTime     @map("period_end") @db.Date
   amount           Decimal      @db.Decimal(14, 2)
   currency         String       @db.Char(3)
-  paidAt           DateTime     @map("paid_at") @db.Timestamptz
+  dueDate          DateTime     @map("due_date") @db.Date
+  paidAt           DateTime?    @map("paid_at") @db.Timestamptz
   paymentMethod    String?      @map("payment_method")
+  /// Gateway transaction id; unique so webhook retries upsert.
   paymentReference String?      @unique(map: "fee_payment_ref_uq") @map("payment_reference")
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  /// Owner/admin for manual entries; null for webhook payments.
+  recordedById     String?      @map("recorded_by")
+  recordedBy       User?        @relation("FeeRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict, map: "fee_recorded_by_fkey")
+  voidedAt         DateTime?    @map("voided_at") @db.Timestamptz
+  voidedById       String?      @map("voided_by")
+  voidedBy         User?        @relation("FeeVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict, map: "fee_voided_by_fkey")
+  voidReason       String?      @map("void_reason")
 
-  @@unique([studentId, academyId, periodStart], map: "fee_student_period_uq")
+  @@unique([studentId, academyId, periodStart], map: "fee_student_period_uq", where: raw("voided_at IS NULL"))
+  @@index([academyId, dueDate], map: "fee_unpaid_due_idx", where: raw("paid_at IS NULL AND voided_at IS NULL"))
   @@index([academyId, periodStart], map: "fee_academy_period_idx")
   @@map("fee")
 }
@@ -108,6 +158,8 @@ model StudentRecord {
   verifiedById  String?             @map("verified_by")
   verifiedBy    User?               @relation("StudentRecordVerifiedBy", fields: [verifiedById], references: [id], onDelete: Restrict, map: "student_record_verified_by_fkey")
   createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  /// Reason for a rejection, shown to the student.
+  reviewNote    String?             @map("review_note")
 
   @@index([academyId, studentId, recordType, recordedOn(sort: Desc)], map: "student_record_history_idx")
   @@index([academyId, createdAt], map: "student_record_pending_idx", where: raw("status = 'pending'"))
@@ -118,30 +170,157 @@ model StudentRecord {
   @@map("student_record")
 }
 
-/// An academy-wide event (teamId null) or a team event.
-/// CHECK calendar_event_ends_after_starts (migration SQL).
+/// An academy-wide event (teamId null) or a team event, lasting one day or
+/// several. Sessions are not stored: a session is the event on one of its
+/// dates (startDate..endDate, minus excludedDates). Dates and times are local
+/// to the academy's time zone.
+/// CHECK calendar_event_end_date_valid, calendar_event_times_together,
+/// calendar_event_end_time_after_start, calendar_event_attendance_needs_start_time
+/// (migration SQL).
 model CalendarEvent {
-  id          String       @id @default(cuid())
-  academyId   String       @map("academy_id")
-  academy     Organization @relation("CalendarEventAcademy", fields: [academyId], references: [id], onDelete: Cascade, map: "calendar_event_academy_id_fkey")
-  teamId      String?      @map("team_id")
+  id                String       @id @default(cuid())
+  academyId         String       @map("academy_id")
+  academy           Organization @relation("CalendarEventAcademy", fields: [academyId], references: [id], onDelete: Cascade, map: "calendar_event_academy_id_fkey")
+  teamId            String?      @map("team_id")
   /// Composite FK: a team event's team must belong to the event's academy.
-  team        Team?        @relation("TeamCalendarEvents", fields: [teamId, academyId], references: [id, organizationId], onDelete: Cascade, map: "calendar_event_team_same_academy")
+  team              Team?        @relation("TeamCalendarEvents", fields: [teamId, academyId], references: [id, organizationId], onDelete: Cascade, map: "calendar_event_team_same_academy")
   /// Free text; allowed values live in app config.
-  eventType   String       @map("event_type")
-  title       String
-  description String?
-  location    String?
-  startsAt    DateTime     @map("starts_at") @db.Timestamptz
-  endsAt      DateTime     @map("ends_at") @db.Timestamptz
-  allDay      Boolean      @default(false) @map("all_day")
-  createdById String       @map("created_by")
-  createdBy   User         @relation("CalendarEventCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "calendar_event_created_by_fkey")
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  eventType         String       @map("event_type")
+  title             String
+  description       String?
+  /// Display only; QR checks use the academy's coordinates.
+  location          String?
+  /// First (or only) day.
+  startDate         DateTime     @map("start_date") @db.Date
+  /// Null = same-day event; set = multi-day (e.g. a camp), every day a session.
+  endDate           DateTime?    @map("end_date") @db.Date
+  /// Both null = all-day. Applies to every session.
+  startTime         DateTime?    @map("start_time") @db.Time
+  endTime           DateTime?    @map("end_time") @db.Time
+  /// Cancelled days of a multi-day event.
+  excludedDates     DateTime[]   @default([]) @map("excluded_dates") @db.Date
+  /// Sessions take attendance and accept QR scans; requires startTime.
+  collectAttendance Boolean      @default(false) @map("collect_attendance")
+  createdById       String       @map("created_by")
+  createdBy         User         @relation("CalendarEventCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "calendar_event_created_by_fkey")
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  attendance        Attendance[] @relation("CalendarEventAttendance")
 
-  @@index([academyId, startsAt], map: "calendar_event_academy_starts_idx")
-  @@index([teamId, startsAt], map: "calendar_event_team_starts_idx", where: raw("team_id IS NOT NULL"))
+  @@unique([id, academyId], map: "calendar_event_id_academy_uq")
+  @@index([academyId, startDate], map: "calendar_event_academy_start_idx")
+  @@index([teamId, startDate], map: "calendar_event_team_start_idx", where: raw("team_id IS NOT NULL"))
   @@index([createdById], map: "calendar_event_created_by_idx")
   @@map("calendar_event")
+}
+
+/// Append-only history of sensitive changes: who did what, to which row, and
+/// why. Write it in the same transaction as the change it describes.
+/// UPDATE, DELETE and TRUNCATE are rejected by a trigger (migration SQL).
+model AuditLog {
+  id               String        @id @default(cuid())
+  /// Null for platform-level actions.
+  academyId        String?       @map("academy_id")
+  academy          Organization? @relation("AuditLogAcademy", fields: [academyId], references: [id], onDelete: Restrict, map: "audit_log_academy_id_fkey")
+  /// Null for webhooks and system jobs.
+  actorId          String?       @map("actor_id")
+  actor            User?         @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: Restrict, map: "audit_log_actor_id_fkey")
+  /// The platform owner who was really acting when `actor` was being
+  /// impersonated (session.impersonated_by); null otherwise.
+  impersonatedById String?       @map("impersonated_by")
+  impersonatedBy   User?         @relation("AuditLogImpersonatedBy", fields: [impersonatedById], references: [id], onDelete: Restrict, map: "audit_log_impersonated_by_fkey")
+  /// e.g. fee.void, attendance.void, attendance.check_out, record.verify.
+  action           String
+  /// e.g. fee, attendance, student_record.
+  entityType       String        @map("entity_type")
+  entityId         String        @map("entity_id")
+  /// Row before the change.
+  before           Json?         @db.JsonB
+  /// Row after the change.
+  after            Json?         @db.JsonB
+  /// Required for voids (app check).
+  reason           String?
+  ip               String?
+  userAgent        String?       @map("user_agent")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([academyId, createdAt(sort: Desc)], map: "audit_log_academy_created_idx")
+  @@index([entityType, entityId], map: "audit_log_entity_idx")
+  @@map("audit_log")
+}
+
+/// Stored first results of POST requests sent with an Idempotency-Key header.
+/// The row is inserted at the start of the request's transaction and filled in
+/// before it commits, so a retry (or a concurrent duplicate, which waits on the
+/// unique index) sees either nothing or the finished result. Not referenced by
+/// any other table; old rows can be deleted freely.
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  /// The client's Idempotency-Key header value.
+  key            String
+  /// userId + method + path: the same key from another user or endpoint is a different entry.
+  scope          String
+  /// SHA-256 of the canonical JSON request body; a reused key with another body is a 409.
+  requestHash    String   @map("request_hash")
+  /// Null only inside the first request's transaction, never after it commits.
+  responseStatus Int?     @map("response_status")
+  responseBody   Json?    @map("response_body") @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([key, scope], map: "idempotency_key_key_scope_uq")
+  @@index([createdAt], map: "idempotency_key_created_idx")
+  @@map("idempotency_key")
+}
+
+/// An open invitation code: not tied to an email. Whoever redeems it while it
+/// is active becomes a member with its role (and joins its team, if set).
+/// Status is derived: revoked (revoked_at set), used_up (use_count reached
+/// max_uses), expired (expires_at passed), else active.
+/// CHECK invitation_code_role_valid, invitation_code_has_limit,
+/// invitation_code_max_uses_positive, invitation_code_use_count_valid,
+/// invitation_code_admin_single_use, invitation_code_revoke_all_or_nothing
+/// (migration SQL).
+model InvitationCode {
+  id           String                     @id @default(cuid())
+  academyId    String                     @map("academy_id")
+  academy      Organization               @relation("InvitationCodeAcademy", fields: [academyId], references: [id], onDelete: Cascade, map: "invitation_code_academy_id_fkey")
+  /// 12 characters from an unambiguous alphabet, stored without dashes.
+  code         String                     @unique(map: "invitation_code_code_uq")
+  /// coach or student; admin only when the platform owner created it.
+  role         String
+  teamId       String?                    @map("team_id")
+  /// Composite FK: the team must belong to the code's academy.
+  team         Team?                      @relation("TeamInvitationCodes", fields: [teamId, academyId], references: [id, organizationId], onDelete: Cascade, map: "invitation_code_team_same_academy")
+  /// 1 = single use; null = unlimited (then expires_at is required).
+  maxUses      Int?                       @map("max_uses")
+  useCount     Int                        @default(0) @map("use_count")
+  /// Null = no expiry (then max_uses is required).
+  expiresAt    DateTime?                  @map("expires_at") @db.Timestamptz
+  createdById  String                     @map("created_by")
+  createdBy    User                       @relation("InvitationCodeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "invitation_code_created_by_fkey")
+  createdAt    DateTime                   @default(now()) @map("created_at") @db.Timestamptz
+  /// Revoking is final.
+  revokedAt    DateTime?                  @map("revoked_at") @db.Timestamptz
+  revokedById  String?                    @map("revoked_by")
+  revokedBy    User?                      @relation("InvitationCodeRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict, map: "invitation_code_revoked_by_fkey")
+  revokeReason String?                    @map("revoke_reason")
+  redemptions  InvitationCodeRedemption[] @relation("InvitationCodeRedemptions")
+
+  @@index([academyId, createdAt(sort: Desc)], map: "invitation_code_academy_created_idx")
+  @@index([createdById], map: "invitation_code_created_by_idx")
+  @@map("invitation_code")
+}
+
+/// One row per person who joined with a code. A person redeems a code once.
+model InvitationCodeRedemption {
+  id         String         @id @default(cuid())
+  codeId     String         @map("code_id")
+  code       InvitationCode @relation("InvitationCodeRedemptions", fields: [codeId], references: [id], onDelete: Cascade, map: "invitation_code_redemption_code_id_fkey")
+  userId     String         @map("user_id")
+  user       User           @relation("InvitationCodeRedemptionUser", fields: [userId], references: [id], onDelete: Cascade, map: "invitation_code_redemption_user_id_fkey")
+  redeemedAt DateTime       @default(now()) @map("redeemed_at") @db.Timestamptz
+
+  @@unique([codeId, userId], map: "invitation_code_redemption_code_user_uq")
+  @@index([userId], map: "invitation_code_redemption_user_idx")
+  @@map("invitation_code_redemption")
 }
