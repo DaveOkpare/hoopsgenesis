@@ -192,3 +192,30 @@ export function cancelledLine(
   const why = session.cancelReason ? `: ${session.cancelReason}` : "";
   return `Cancelled${who}${why}`;
 }
+
+type DeleteDay = Pick<EventSessionItem, "date" | "tally">;
+
+/** Someone has a present, late, absent or excused row for the day. */
+export function hasCheckIns(tally: EventSessionItem["tally"]): boolean {
+  return (
+    tally !== null &&
+    tally.present + tally.late + tally.absent + tally.excused > 0
+  );
+}
+
+/**
+ * Whether "Delete event" removes the event itself (DELETE /events/:id): every date
+ * is still to come, cancelled ones included, and nobody has checked in to any. The
+ * server refuses only an event with attendance; past dates are kept for their
+ * history, so an event with a past date has its remaining days cancelled instead.
+ */
+export function deletesWholeEvent(
+  days: readonly DeleteDay[],
+  today: DateOnly
+): boolean {
+  return (
+    days.length > 0 &&
+    days.every((d) => d.date >= today) &&
+    !days.some((d) => hasCheckIns(d.tally))
+  );
+}

@@ -46,6 +46,24 @@ function person(userId: Id | null, academyId: Id): PersonRef | null {
   return { id: found.id, name: found.name, roles: membership?.roles ?? [] };
 }
 
+/** Coaches on the student's team, minus the recorder and the student (as in api.ts). */
+function reviewersOf(record: StudentRecord): PersonRef[] {
+  const teamIds =
+    members.find(
+      (m) => m.userId === record.studentId && m.academyId === record.academyId
+    )?.teamIds ?? [];
+  return members
+    .filter(
+      (m) =>
+        m.academyId === record.academyId &&
+        m.roles.includes("coach") &&
+        m.teamIds.some((teamId) => teamIds.includes(teamId)) &&
+        m.userId !== record.recordedBy &&
+        m.userId !== record.studentId
+    )
+    .map((m) => ({ id: m.userId, name: m.user.name, roles: m.roles }));
+}
+
 function toView({ review, ...record }: StoredRecord): StudentRecordView {
   const template =
     record.data.template ?? record.data.drill ?? record.data.kind;
@@ -66,6 +84,7 @@ function toView({ review, ...record }: StoredRecord): StudentRecordView {
     recordedByPerson: person(record.recordedBy, record.academyId),
     reviewedBy: review ? person(review.reviewedBy, record.academyId) : null,
     reviewedAt: review?.reviewedAt ?? null,
+    reviewers: reviewersOf(record),
   };
 }
 

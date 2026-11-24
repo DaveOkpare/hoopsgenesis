@@ -143,6 +143,9 @@ function toPlatformAcademy(row: StoredAcademy): PlatformAcademy {
     memberCount: row.counts.admins + row.counts.coaches + row.counts.students,
     teamCount: row.counts.teams,
     pendingAdminEmail: row.pendingAdminEmail,
+    pendingAdminInvitationId: row.pendingAdminEmail
+      ? `inv-admin-${row.academy.id}`
+      : null,
     qr: row.qr,
     status: statusOf(row),
   };

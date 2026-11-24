@@ -47,7 +47,7 @@ export function WrongAccountNotice({
         <p className="text-[17px] text-ink-soft leading-[25px]">
           You're signed in as{" "}
           <span className="font-semibold text-ink">{signedInAs}</span>, but this
-          invite was sent to another email address. Sign out, then create your
+          invite is for another email address. Sign out, then create your
           account or sign in with the invited email.
         </p>
       </div>

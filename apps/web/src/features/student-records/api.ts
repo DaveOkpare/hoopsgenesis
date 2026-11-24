@@ -52,6 +52,12 @@ export interface StudentRecordView {
   recordType: RecordType;
   reviewedAt: Timestamp | null;
   reviewedBy: PersonRef | null;
+  /**
+   * Coaches on the student's team who may verify it: the recorder and the student
+   * are left out (the server refuses `cannot_review_own_record`), as in the records
+   * feature's `reviewerNames`. Empty when the roster can't be read.
+   */
+  reviewers: PersonRef[];
   reviewNote: string | null;
   schemaVersion: number;
   status: RecordStatus;
@@ -115,7 +121,7 @@ interface RecordRow {
   verifiedById: Id | null;
 }
 
-type Roles = Map<Id, { roles: AcademyRole[] }>;
+type Roles = Map<Id, { name: string; roles: AcademyRole[] }>;
 
 async function loadRoles(academyId: Id): Promise<Roles> {
   try {
@@ -150,6 +156,14 @@ function toView(row: RecordRow, roles: Roles): StudentRecordView {
     recordedByPerson: person(row.recordedBy, roles),
     reviewedBy: row.status === "pending" ? null : person(row.verifiedBy, roles),
     reviewedAt: null,
+    reviewers: [...roles.entries()]
+      .filter(
+        ([id, { roles: held }]) =>
+          held.includes("coach") &&
+          id !== row.recordedById &&
+          id !== row.studentId
+      )
+      .map(([id, rest]) => ({ id, name: rest.name, roles: rest.roles })),
   };
 }
 

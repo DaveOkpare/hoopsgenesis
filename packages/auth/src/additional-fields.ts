@@ -29,9 +29,17 @@ export const organizationSchema = {
       /**
        * Random value baked into the academy's printed QR code. Set on the
        * server when the academy is created (never from the client);
-       * regenerating it retires old prints.
+       * regenerating it retires old prints. Never returned by Better Auth
+       * (organization list, get-full-organization, set-active): server code
+       * reads it through Prisma, and admins get the QR from
+       * GET /api/v1/academies/:id/academy-qr.
        */
-      qrNonce: { type: "string", required: false, input: false },
+      qrNonce: {
+        type: "string",
+        required: false,
+        input: false,
+        returned: false,
+      },
     },
   },
   team: {

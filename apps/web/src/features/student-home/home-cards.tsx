@@ -230,9 +230,15 @@ export function ResultTile({
       pending.record.recordedOn === today
         ? "today"
         : `on ${dayMonth(pending.record.recordedOn)}`;
-    const who = pending.record.recordedByPerson
-      ? personLabel(pending.record.recordedByPerson)
-      : "your coach";
+    // The recorder can't verify their own record: name another coach, or nobody.
+    const [reviewer, ...others] = pending.record.reviewers;
+    let who = "a coach";
+    if (reviewer) {
+      who =
+        others.length > 0
+          ? `${personLabel(reviewer)} or another coach`
+          : personLabel(reviewer);
+    }
     note = `${formatResult(pending.result, progress.series)} ${when} is waiting for ${who} to verify.`;
   } else if (progress.best) {
     note = `Best set on ${dayMonth(progress.best.record.recordedOn)}.`;

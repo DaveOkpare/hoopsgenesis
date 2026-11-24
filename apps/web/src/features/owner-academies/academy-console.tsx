@@ -64,8 +64,11 @@ function plural(count: number, one: string, many: string): string {
 
 function subtitle(row: PlatformAcademy): string {
   const place = placeLabel(row.academy.timezone);
-  return row.adminName
-    ? `${place} · Admin ${row.adminName}`
+  if (row.adminName) {
+    return `${place} · Admin ${row.adminName}`;
+  }
+  return row.pendingAdminEmail
+    ? `${place} · Admin invited`
     : `${place} · No admin yet`;
 }
 

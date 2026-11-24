@@ -11,6 +11,7 @@ import {
 import { useCallback } from "react";
 import { toast } from "sonner";
 
+import { deletesWholeEvent } from "@/features/events/model";
 import {
   type EventDetail,
   eventErrorMessage,
@@ -44,6 +45,15 @@ export function DeleteEventDialog({
     (s) => s.date >= today && !s.cancelled
   );
   const hasPast = detail.sessions.some((s) => s.date < today && !s.cancelled);
+  // An event whose dates are all cancelled has none left to remove, but the event
+  // itself can still go when nobody checked in (the rule deleteUpcoming follows).
+  const eventIds = new Set(detail.sessions.map((s) => s.eventId));
+  const removesAnEvent = [...eventIds].some((id) =>
+    deletesWholeEvent(
+      detail.sessions.filter((s) => s.eventId === id),
+      today
+    )
+  );
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
@@ -76,6 +86,13 @@ export function DeleteEventDialog({
   }, [detail.sessions, mutate, onDeleted, today]);
 
   const count = upcoming.length;
+  let summary = "There are no dates left to remove.";
+  if (count > 0) {
+    summary = `Removes the ${count} ${count === 1 ? "date" : "dates"} still to come.`;
+  } else if (removesAnEvent) {
+    summary =
+      "All its dates are cancelled. Deleting removes it from the calendar.";
+  }
   return (
     <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogContent className="md:max-w-[460px]">
@@ -88,9 +105,7 @@ export function DeleteEventDialog({
         </DialogHeader>
         <DialogBody className="gap-4 pt-5 max-md:pt-5">
           <p className="text-[15px] text-ink leading-[22px]">
-            {count === 0
-              ? "There are no dates left to remove."
-              : `Removes the ${count} ${count === 1 ? "date" : "dates"} still to come.`}
+            {summary}
             {hasPast
               ? " Past sessions and their attendance stay in the records."
               : ""}
@@ -104,7 +119,7 @@ export function DeleteEventDialog({
             Keep it
           </Button>
           <Button
-            disabled={isPending || count === 0}
+            disabled={isPending || (count === 0 && !removesAnEvent)}
             onClick={handleDelete}
             variant="destructive"
           >

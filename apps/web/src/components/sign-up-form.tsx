@@ -136,7 +136,7 @@ export default function SignUpForm({
               <FormTextField
                 autoComplete="email"
                 className={whiteFieldClass}
-                description="Use the email address the invite was sent to."
+                description="Use the email address the invite is for."
                 descriptionClassName="max-md:hidden"
                 field={field}
                 inputMode="email"

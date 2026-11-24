@@ -8,7 +8,10 @@ import { Link } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import { QueryBoundary } from "@/components/error-state";
-import { AcademyDetail } from "@/features/owner-academies/academy-detail";
+import {
+  AcademyDetail,
+  CopyAdminInviteLink,
+} from "@/features/owner-academies/academy-detail";
 import {
   type ConsoleSearch,
   knownCountry,
@@ -31,6 +34,17 @@ import {
   initials,
 } from "@/lib/format";
 import { appNow } from "@/lib/preview";
+
+/** "Admin Sharika D.", "Admin invited" (pending invite) or "No admin yet". */
+function adminLabel(detail: {
+  adminName: string | null;
+  pendingAdminEmail: string | null;
+}): string {
+  if (detail.adminName) {
+    return `Admin ${detail.adminName}`;
+  }
+  return detail.pendingAdminEmail ? "Admin invited" : "No admin yet";
+}
 
 const QR_RECENT_DAYS = 14;
 const MS_PER_DAY = 86_400_000;
@@ -301,13 +315,14 @@ function PhoneDetail({
       ) : (
         <div className="flex flex-col gap-[2px] border-line border-b pb-3">
           <p className="font-semibold text-[15px] text-ink leading-5">
-            No admin yet
+            {detail.pendingAdminEmail ? "Admin invited" : "No admin yet"}
           </p>
           <p className="text-[13px] text-muted leading-4">
             {detail.pendingAdminEmail
-              ? `${detail.pendingAdminEmail} hasn't accepted the invitation yet`
+              ? `${detail.pendingAdminEmail} hasn't accepted the invitation yet. Email delivery isn’t switched on yet, so send them the link.`
               : "Appoint one from their page under Users"}
           </p>
+          <CopyAdminInviteLink invitationId={detail.pendingAdminInvitationId} />
         </div>
       )}
       <div className="flex flex-col gap-[9px]">
@@ -403,8 +418,7 @@ function TabletDetail({
           </h1>
           <p className="flex items-center gap-[6px] text-muted text-sm leading-[18px]">
             <Dot timeZone={academy.timezone} />
-            {placeLabel(academy.timezone)} ·{" "}
-            {detail.adminName ? `Admin ${detail.adminName}` : "No admin yet"}
+            {placeLabel(academy.timezone)} · {adminLabel(detail)}
           </p>
         </div>
         {badge ? (

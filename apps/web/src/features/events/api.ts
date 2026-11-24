@@ -10,6 +10,7 @@
  * GET /events (findSeries) and act on each of its events: edit and delete touch the
  * events still to come, cancel touches one day.
  */
+import { deletesWholeEvent, hasCheckIns } from "@/features/events/model";
 import { addDays, daysBetween } from "@/features/sessions/time";
 import type {
   AttendanceStatus,
@@ -649,13 +650,6 @@ export async function cancelEventDay(
   return input;
 }
 
-function hasRows(tally: SessionTally | null): boolean {
-  return (
-    tally !== null &&
-    tally.present + tally.late + tally.absent + tally.excused > 0
-  );
-}
-
 /**
  * "Delete event": removes every date still to come; past sessions and their attendance
  * stay. Each event whose dates are all still to come is deleted (DELETE /events/:id);
@@ -688,10 +682,9 @@ export async function deleteUpcoming(
   ): Promise<void> => {
     // Days someone has checked in to stay (the server refuses to remove them); the
     // tallies the page already loaded say which, so no request is sent to be refused.
-    const attended = days.filter((d) => hasRows(d.tally));
+    const attended = days.filter((d) => hasCheckIns(d.tally));
     kept += attended.filter((d) => d.date >= input.today).length;
-    const allAhead = days.every((d) => d.date >= input.today);
-    if (allAhead && attended.length === 0) {
+    if (deletesWholeEvent(days, input.today)) {
       try {
         await apiRaw(academyPath(academyId, `/events/${eventId}`), {
           method: "DELETE",
@@ -705,7 +698,7 @@ export async function deleteUpcoming(
       }
     }
     const open = days.filter(
-      (d) => !(d.cancelled || hasRows(d.tally)) && d.date >= input.today
+      (d) => !(d.cancelled || hasCheckIns(d.tally)) && d.date >= input.today
     );
     const results = await Promise.allSettled(
       open.map((d) =>

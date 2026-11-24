@@ -91,12 +91,24 @@ const SKELETON_ROWS = ["a", "b", "c", "d", "e"];
 const MS_PER_DAY = 86_400_000;
 const DAYS_IN_WEEK = 7;
 
-/** "Today, 09:14", "Fri, 14:20", "16 Nov, 08:11". */
-function whenLabel(value: string, timeZone: string | undefined): string {
+/**
+ * Rows mix academies in different zones and platform rows that have none, so every
+ * time on the page is the viewer's own (undefined = the browser's zone), as stated
+ * under the title. That keeps the newest-first list reading in order.
+ */
+const VIEWER_TIME_ZONE = undefined;
+
+/** "Europe/London": the zone the page's times are in. */
+function viewerZoneName(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+/** "Today, 09:14", "Fri, 14:20", "16 Nov, 08:11", in the viewer's time zone. */
+function whenLabel(value: string): string {
   const now = appNow();
-  const day = formatRelativeDay(value, timeZone, now);
+  const day = formatRelativeDay(value, VIEWER_TIME_ZONE, now);
   const old = (now.getTime() - Date.parse(value)) / MS_PER_DAY >= DAYS_IN_WEEK;
-  return `${old ? formatDayMonth(value, timeZone) : day}, ${formatTime(value, timeZone)}`;
+  return `${old ? formatDayMonth(value, VIEWER_TIME_ZONE) : day}, ${formatTime(value, VIEWER_TIME_ZONE)}`;
 }
 
 function FilterPill<T extends string>({
@@ -298,7 +310,6 @@ function EntryRow({
     [entry.id, onToggle]
   );
   const detailId = `owner-audit-${entry.id}`;
-  const tz = entry.academy?.timezone;
   const actorName = actorText(entry);
   return (
     <li className={cn("flex flex-col border-line border-b", open && "bg-fog")}>
@@ -311,10 +322,10 @@ function EntryRow({
       >
         <span className="flex w-[170px] shrink-0 flex-col pl-3 max-lg:w-[150px]">
           <span className="text-[15px] text-ink leading-[18px]">
-            {whenLabel(entry.createdAt, tz)}
+            {whenLabel(entry.createdAt)}
           </span>
           <span className="text-[13px] text-muted leading-4">
-            {formatDayMonth(entry.createdAt, tz)}
+            {formatDayMonth(entry.createdAt, VIEWER_TIME_ZONE)}
             {entry.academy ? (
               <>
                 {" · "}
@@ -368,7 +379,7 @@ function PhoneEntry({ entry }: { entry: OwnerAuditItem }) {
   return (
     <li className="flex gap-3 border-line border-b py-[11px]">
       <span className="w-10 shrink-0 font-semibold text-[12px] text-muted leading-[18px]">
-        {formatTime(entry.createdAt, tz)}
+        {formatTime(entry.createdAt, VIEWER_TIME_ZONE)}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
         <span className="text-ink text-sm leading-[18px]">
@@ -391,7 +402,7 @@ function PhoneEntry({ entry }: { entry: OwnerAuditItem }) {
 }
 
 function dayHeading(value: string): string {
-  const day = formatRelativeDay(value, undefined, appNow());
+  const day = formatRelativeDay(value, VIEWER_TIME_ZONE, appNow());
   if (day === "Today" || day === "Yesterday") {
     return day;
   }
@@ -665,6 +676,9 @@ export function OwnerAuditScreen({
             <span className="md:hidden">All academies</span>
           </Eyebrow>
           <PageTitle>Audit log</PageTitle>
+          <p className="text-muted text-sm leading-[18px]">
+            Newest first. Times are in your time zone ({viewerZoneName()}).
+          </p>
         </PageHeading>
       </PageHeader>
       <div className="flex flex-wrap gap-2 max-md:hidden">

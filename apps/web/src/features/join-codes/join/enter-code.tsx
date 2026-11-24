@@ -278,7 +278,7 @@ export function EnterCode({
         <p className="text-base text-muted leading-[23px]">
           <span className="max-md:hidden">
             Enter the join code your coach or academy gave you. Got an invite
-            email instead? Open the link in it.
+            link from your academy instead? Open it.
           </span>
           <span className="md:hidden">
             Type the join code you were given. You’ll check it before anything

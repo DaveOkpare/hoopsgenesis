@@ -106,7 +106,7 @@ export async function getSetupChecklist(
     const joined = count(role);
     return joined > 0
       ? plural(joined, role).replace("coachs", "coaches")
-      : `${plural(invited(role), "invite")} sent`;
+      : `${plural(invited(role), "invite")} created`;
   };
   const facts: Record<SetupStepId, { done: boolean; note: string | null }> = {
     details: { done: Boolean(org?.location), note: null },

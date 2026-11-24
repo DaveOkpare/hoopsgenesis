@@ -12,7 +12,11 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import { useCallback } from "react";
 import { toast } from "sonner";
-
+import {
+  copyInviteLink,
+  NO_EMAIL_NOTE,
+  renewedToast,
+} from "@/features/members/invite-link";
 import {
   invitationsQueryOptions,
   membersQueryOptions,
@@ -148,17 +152,18 @@ export function InviteDetail({
     resend.mutate(
       { academyId, invitationId },
       {
-        onSuccess: (sent) =>
-          toast.success(
-            `New invite sent to ${sent.email}. It works for 48 hours.`
-          ),
+        onSuccess: (renewed) => renewedToast(renewed),
         onError: (error) =>
           toast.error(
-            errorMessage(error, "Couldn't resend the invite. Try again.")
+            errorMessage(error, "Couldn't renew the invite. Try again.")
           ),
       }
     );
   }, [resend, academyId, invitationId]);
+  const handleCopy = useCallback(
+    () => copyInviteLink(invitationId),
+    [invitationId]
+  );
   const handleCancel = useCallback(() => {
     cancel.mutate(
       { academyId, invitationId },
@@ -195,7 +200,7 @@ export function InviteDetail({
             </EmptyTitle>
             <EmptyDescription className="text-[15px]">
               It was accepted or cancelled. Find the person under Members, or
-              send a new invite.
+              create a new invite.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -253,9 +258,9 @@ export function InviteDetail({
       <dl className="flex flex-col">
         <DetailRow label="Joins as" value={ROLE_LABEL[invite.role]} />
         <DetailRow label="Team" value={teamLabel} />
-        <DetailRow label="Sent by" value={inviterName} />
+        <DetailRow label="Created by" value={inviterName} />
         <DetailRow
-          label="Sent"
+          label="Created"
           value={weekdayDayMonth(invite.createdAt, timeZone)}
         />
         <DetailRow
@@ -265,11 +270,22 @@ export function InviteDetail({
         />
       </dl>
       <p className="rounded-md bg-fog px-4 py-[14px] text-ink-soft text-sm leading-5">
-        {teamWaits}Resending makes a new link that works for 48 hours.
+        {teamWaits}
+        {NO_EMAIL_NOTE} Renewing makes the link work for another 48 hours.
       </p>
       <div className="flex flex-col gap-2">
-        <Button className="w-full" disabled={busy} onClick={handleResend}>
-          {resend.isPending ? "Sending…" : "Resend invite"}
+        {expired ? null : (
+          <Button className="w-full" disabled={busy} onClick={handleCopy}>
+            Copy invite link
+          </Button>
+        )}
+        <Button
+          className="w-full"
+          disabled={busy}
+          onClick={handleResend}
+          variant={expired ? "default" : "outline"}
+        >
+          {resend.isPending ? "Renewing…" : "Renew invite"}
         </Button>
         <Button
           className="w-full text-orange-deep"

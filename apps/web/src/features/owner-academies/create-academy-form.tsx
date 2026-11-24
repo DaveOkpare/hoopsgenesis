@@ -24,6 +24,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import z from "zod";
+import { copyInviteLink } from "@/features/members/invite-link";
 import {
   type LatLng,
   MockMap,
@@ -639,8 +640,20 @@ export function CreateAcademyForm() {
           attendanceRadiusM: value.attendanceRadiusM,
           adminEmail: value.adminEmail.trim(),
         });
+        const invitationId = row.pendingAdminInvitationId;
         toast.success(`${row.academy.name} is ready`, {
-          description: `Invite sent to ${value.adminEmail.trim()}.`,
+          description: invitationId
+            ? `Admin invite created for ${row.pendingAdminEmail}. Email delivery isn’t switched on yet, so copy the invite link and send it to them.`
+            : `${value.adminEmail.trim()} is its admin.`,
+          ...(invitationId
+            ? {
+                duration: Number.POSITIVE_INFINITY,
+                action: {
+                  label: "Copy invite link",
+                  onClick: () => copyInviteLink(invitationId),
+                },
+              }
+            : {}),
         });
         await navigate({
           to: "/owner/academies/$academyId",

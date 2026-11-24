@@ -71,7 +71,7 @@ async function requestReset(email: string): Promise<ResetResult> {
 
 const FAILURE_COPY: Record<Exclude<ResetResult, "sent">, string> = {
   disabled:
-    "Reset links by email aren't switched on yet, so nothing was sent. Ask your academy admin to help you get back in.",
+    "Password reset by email isn't switched on yet, so nothing was sent. Contact the platform's support or owner to get back in.",
   rate_limited: "Too many tries. Wait a minute and try again.",
   failed: "Couldn't send the link right now. Try again in a few minutes.",
 };

@@ -388,7 +388,7 @@ export function JoinCodesScreen({
         <EmptyHeader>
           <EmptyTitle>No join codes yet</EmptyTitle>
           <EmptyDescription>
-            A code lets people join without an email invite. Send it on
+            A code lets people join without their own invite link. Send it on
             WhatsApp, read it out or print it.
           </EmptyDescription>
         </EmptyHeader>

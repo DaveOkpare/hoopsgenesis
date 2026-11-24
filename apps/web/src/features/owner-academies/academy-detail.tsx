@@ -17,6 +17,7 @@ import { Link } from "@tanstack/react-router";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
+import { copyInviteLink } from "@/features/members/invite-link";
 import {
   OWNER_CAN_REPLACE_QR,
   type PlatformAcademyDetail,
@@ -35,6 +36,27 @@ function formatCreated(value: string, timeZone: string): string {
     year: "numeric",
     timeZone,
   }).format(new Date(value));
+}
+
+/** The first admin's invite link: nothing is emailed, so the owner sends it. */
+export function CopyAdminInviteLink({
+  invitationId,
+}: {
+  invitationId: Id | null;
+}) {
+  const copy = useCallback(() => {
+    if (invitationId) {
+      copyInviteLink(invitationId);
+    }
+  }, [invitationId]);
+  if (!invitationId) {
+    return null;
+  }
+  return (
+    <Button className="self-start" onClick={copy} size="sm" variant="outline">
+      Copy invite link
+    </Button>
+  );
 }
 
 function StatTile({ value, label }: { value: number; label: string }) {
@@ -187,9 +209,15 @@ export function AcademyDetail({
           {academy.timezone} · {academy.defaultCurrency}
         </p>
         {detail.pendingAdminEmail ? (
-          <p className="text-orange-deep text-sm leading-[18px]">
-            Admin invited · {detail.pendingAdminEmail} hasn't accepted yet
-          </p>
+          <>
+            <p className="text-orange-deep text-sm leading-[18px]">
+              Admin invited · {detail.pendingAdminEmail} hasn't accepted yet.
+              Email delivery isn’t switched on yet, so send them the link.
+            </p>
+            <CopyAdminInviteLink
+              invitationId={detail.pendingAdminInvitationId}
+            />
+          </>
         ) : null}
       </div>
       <div className="flex gap-2 max-md:grid max-md:grid-cols-2">

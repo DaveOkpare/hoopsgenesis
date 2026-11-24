@@ -30,6 +30,11 @@ export interface PlatformAcademy {
   memberCount: number;
   /** Email of the pending first-admin invite, if any. */
   pendingAdminEmail: string | null;
+  /**
+   * Its id: the secret in the invite link, which only the platform owner may see.
+   * No email is sent, so the owner copies `/invite/<id>` to the admin.
+   */
+  pendingAdminInvitationId: Id | null;
   qr: { regeneratedAt: Timestamp | null; regeneratedBy: string | null };
   status: PlatformAcademyStatus;
   teamCount: number;
@@ -141,6 +146,7 @@ function toPlatformAcademy(dto: AcademyRowDto, qr: QrState): PlatformAcademy {
     memberCount: dto.memberCount,
     teamCount: dto.teamCount,
     pendingAdminEmail: dto.pendingAdminInvitations[0]?.email ?? null,
+    pendingAdminInvitationId: dto.pendingAdminInvitations[0]?.id ?? null,
     qr,
   };
   return { ...row, status: statusOf(row) };
@@ -319,7 +325,7 @@ export async function createAcademy(
     Record<string, unknown> & {
       firstAdmin:
         | { status: "member"; member: { userId: Id } }
-        | { status: "invited"; invitation: { email: string } };
+        | { status: "invited"; invitation: { email: string; id: Id } };
       id: Id;
     }
   >("/admin/academies", {
@@ -336,7 +342,8 @@ export async function createAcademy(
       firstAdmin: { email: input.adminEmail },
     },
   });
-  const invited = created.firstAdmin.status === "invited";
+  const { firstAdmin } = created;
+  const invited = firstAdmin.status === "invited";
   const row = {
     academy: toAcademy(created),
     // The admin's name isn't in the create response; the list refetch fills it in.
@@ -345,6 +352,7 @@ export async function createAcademy(
     memberCount: invited ? 0 : 1,
     teamCount: 0,
     pendingAdminEmail: invited ? input.adminEmail : null,
+    pendingAdminInvitationId: invited ? firstAdmin.invitation.id : null,
     qr: NO_QR_CHANGE,
   };
   return { ...row, status: statusOf(row) };

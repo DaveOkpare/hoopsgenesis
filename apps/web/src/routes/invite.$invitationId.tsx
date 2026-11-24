@@ -178,7 +178,7 @@ function CreateAccount({
                     invitation.expiresAt,
                     invitation.academyTimezone
                   )}.`
-                : "Use the email address the invite was sent to. Your invite is accepted as soon as the account is made."}
+                : "Use the email address the invite is for. Your invite is accepted as soon as the account is made."}
             </p>
           </div>
         </>

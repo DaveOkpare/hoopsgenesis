@@ -217,7 +217,7 @@ export default function SignInForm({
             New here?
           </p>
           <p className="text-muted text-sm leading-5">
-            Accounts come from an email invite or a join code from your academy.
+            Accounts come from an invite link or a join code from your academy.
             Got a code?{" "}
             <Link
               className={authLinkClass}
@@ -229,7 +229,7 @@ export default function SignInForm({
           </p>
         </div>
         <p className="text-center text-muted text-sm leading-5 md:hidden">
-          No account? Open your invite email, or{" "}
+          No account? Open your invite link, or{" "}
           <Link className={authLinkClass} to="/join">
             use a join code
           </Link>

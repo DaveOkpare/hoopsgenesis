@@ -25,6 +25,7 @@ import {
 } from "@hoops-genesis/ui/components/toggle-group";
 import { useForm } from "@tanstack/react-form";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
   type FormEvent,
   type MouseEvent,
@@ -41,6 +42,7 @@ import {
   isEmail,
   splitEmails,
 } from "@/features/members/email-chips-input";
+import { copyInviteLink, NO_EMAIL_NOTE } from "@/features/members/invite-link";
 import {
   type InvitableRole,
   invitationsQueryOptions,
@@ -52,7 +54,7 @@ import {
   type TeamListItem,
   teamListQueryOptions,
 } from "@/features/teams/queries";
-import type { Id } from "@/features/types";
+import type { Id, Invitation } from "@/features/types";
 import { errorMessage } from "@/lib/api-client";
 import { useIsPhone } from "@/lib/use-is-phone";
 
@@ -251,14 +253,59 @@ function TeamField({
   );
 }
 
+function CreatedInviteRow({ invite }: { invite: Invitation }) {
+  const copy = useCallback(() => copyInviteLink(invite.id), [invite.id]);
+  return (
+    <li className="flex items-center justify-between gap-3 rounded-md bg-fog px-4 py-3">
+      <span className="min-w-0 truncate text-ink text-sm leading-[18px]">
+        {invite.email}
+      </span>
+      <Button onClick={copy} size="sm" variant="outline">
+        Copy invite link
+      </Button>
+    </li>
+  );
+}
+
+/** After creating: nothing was emailed, so each link is copied from here. */
+function InvitesCreated({
+  invites,
+  onDone,
+}: {
+  invites: Invitation[];
+  onDone: () => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <DialogBody className="gap-[14px]">
+        <p className="font-semibold text-ink text-sm leading-5" role="status">
+          {invites.length} {inviteWord(invites.length)} created. Each link works
+          for 48 hours.
+        </p>
+        <p className="text-ink-soft text-sm leading-5">{NO_EMAIL_NOTE}</p>
+        <ul aria-label="Invite links" className="flex flex-col gap-2">
+          {invites.map((invite) => (
+            <CreatedInviteRow invite={invite} key={invite.id} />
+          ))}
+        </ul>
+      </DialogBody>
+      <DialogFooter>
+        <Button className="px-[22px]" onClick={onDone}>
+          Done
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
 function InviteForm({
   academyId,
   defaultRole,
-  onDone,
+  onCreated,
 }: {
   academyId: Id;
   defaultRole: InvitableRole;
-  onDone: () => void;
+  onCreated: (invites: Invitation[]) => void;
 }) {
   const isPhone = useIsPhone();
   const teams = useQuery(teamListQueryOptions(academyId)).data ?? [];
@@ -287,8 +334,9 @@ function InviteForm({
       if (toSend.length === 0) {
         return;
       }
+      let created: Invitation[];
       try {
-        await invite.mutateAsync({
+        created = await invite.mutateAsync({
           academyId,
           emails: toSend,
           role: value.role,
@@ -296,14 +344,11 @@ function InviteForm({
         });
       } catch (error) {
         toast.error(
-          errorMessage(error, "Couldn’t send the invites. Try again.")
+          errorMessage(error, "Couldn’t create the invites. Try again.")
         );
         return;
       }
-      toast.success(
-        `${toSend.length} ${inviteWord(toSend.length)} sent. Each link works for 48 hours.`
-      );
-      onDone();
+      onCreated(created);
     },
   });
 
@@ -375,21 +420,31 @@ function InviteForm({
             )}
           </form.Field>
         </div>
+        <p className="text-muted text-sm leading-5">
+          Quicker for a group: share a{" "}
+          <Link
+            className="font-semibold text-ink underline underline-offset-[3px]"
+            to="/admin/join-codes"
+          >
+            join code
+          </Link>{" "}
+          instead.
+        </p>
       </DialogBody>
       <form.Subscribe selector={selectEmails}>
         {(emails) => {
           const count = sendable(emails).length;
-          let label = "Send invites";
+          let label = "Create invites";
           if (invite.isPending) {
-            label = "Sending…";
+            label = "Creating…";
           } else if (count > 0) {
-            label = `Send ${count} ${inviteWord(count)}`;
+            label = `Create ${count} ${inviteWord(count)}`;
           }
           return (
             <DialogFooter>
               <DialogFooterNote>
                 <span className="max-md:hidden">
-                  {count} {inviteWord(count)} will be sent
+                  {count} {inviteWord(count)} will be created
                 </span>
                 <span className="md:hidden">Each link works for 48 hours.</span>
               </DialogFooterNote>
@@ -428,25 +483,42 @@ export function InviteDialog({
   defaultRole: InvitableRole;
   onOpenChange: (open: boolean) => void;
 }) {
-  const close = useCallback(() => onOpenChange(false), [onOpenChange]);
+  const [created, setCreated] = useState<Invitation[] | null>(null);
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        setCreated(null);
+      }
+      onOpenChange(next);
+    },
+    [onOpenChange]
+  );
+  const close = useCallback(() => handleOpenChange(false), [handleOpenChange]);
+  let body: React.ReactNode = null;
+  if (open && created) {
+    body = <InvitesCreated invites={created} onDone={close} />;
+  } else if (open) {
+    body = (
+      <QueryBoundary className={DIALOG_ERROR_CLASS} what="the invite form">
+        <InviteForm
+          academyId={academyId}
+          defaultRole={defaultRole}
+          onCreated={setCreated}
+        />
+      </QueryBoundary>
+    );
+  }
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
+    <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogContent initialFocus={focusEmailsInput} mobile="fullscreen">
         <DialogHeader>
           <DialogTitle>Invite people</DialogTitle>
           <DialogDescription>
-            Each email gets its own invite link. Links expire after 48 hours.
+            Each email gets its own invite link to send yourself. Links expire
+            after 48 hours.
           </DialogDescription>
         </DialogHeader>
-        {open ? (
-          <QueryBoundary className={DIALOG_ERROR_CLASS} what="the invite form">
-            <InviteForm
-              academyId={academyId}
-              defaultRole={defaultRole}
-              onDone={close}
-            />
-          </QueryBoundary>
-        ) : null}
+        {body}
       </DialogContent>
     </Dialog>
   );

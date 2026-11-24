@@ -16,6 +16,7 @@ import {
   detailTallies,
   detailTeams,
 } from "@/features/events/fixtures";
+import { deletesWholeEvent } from "@/features/events/model";
 import { fixtureDelay } from "@/features/fixtures";
 import { calendarEvents } from "@/features/sessions/fixtures";
 import {
@@ -314,7 +315,7 @@ export async function deleteUpcoming(
   const ids = new Set(input.sessions.map((s) => s.eventId));
   for (const id of ids) {
     const days = input.sessions.filter((s) => s.eventId === id);
-    if (days.every((d) => d.date >= input.today)) {
+    if (deletesWholeEvent(days, input.today)) {
       for (const list of [detailEvents, calendarEvents]) {
         const index = list.findIndex((e) => e.id === id);
         if (index >= 0) {

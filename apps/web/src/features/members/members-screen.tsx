@@ -52,6 +52,7 @@ import { toast } from "sonner";
 
 import { MoreIcon, PlusIcon } from "@/components/icons";
 import { joinCodesQueryOptions } from "@/features/join-codes/queries";
+import { copyInviteLink, renewedToast } from "@/features/members/invite-link";
 import {
   invitationsQueryOptions,
   memberCountsQueryOptions,
@@ -188,7 +189,7 @@ function inviterText(invite: Invitation, ctx: RowContext, users: Member[]) {
 }
 
 function inviteStatusText(invite: Invitation, ctx: RowContext): string {
-  return `Pending · sent ${relativeAgo(daysAgo(invite.createdAt, ctx.now, ctx.timeZone))}`;
+  return `Pending · created ${relativeAgo(daysAgo(invite.createdAt, ctx.now, ctx.timeZone))}`;
 }
 
 interface RowHandlers {
@@ -212,6 +213,7 @@ function RowActions({
   const { onResend, onCancel, onOpenInvite } = handlers;
   const resend = useCallback(() => onResend(row.id), [onResend, row.id]);
   const cancel = useCallback(() => onCancel(row.id), [onCancel, row.id]);
+  const copyLink = useCallback(() => copyInviteLink(row.id), [row.id]);
   const openInvite = useCallback(
     () => onOpenInvite(row.id),
     [onOpenInvite, row.id]
@@ -253,7 +255,10 @@ function RowActions({
             <DropdownMenuItem onClick={openInvite}>
               Open invite
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={resend}>Resend invite</DropdownMenuItem>
+            <DropdownMenuItem onClick={copyLink}>
+              Copy invite link
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={resend}>Renew invite</DropdownMenuItem>
             <DropdownMenuItem onClick={cancel} variant="destructive">
               Cancel invite
             </DropdownMenuItem>
@@ -291,7 +296,7 @@ function ResendLink({
         onClick={resend}
         type="button"
       >
-        resend
+        renew
       </button>
     </span>
   );
@@ -945,13 +950,10 @@ function useInviteActions(academyId: Id) {
       resend.mutate(
         { academyId, invitationId: id },
         {
-          onSuccess: (invite) =>
-            toast.success(
-              `New invite sent to ${invite.email}. It works for 48 hours.`
-            ),
+          onSuccess: (invite) => renewedToast(invite),
           onError: (error) =>
             toast.error(
-              errorMessage(error, "Couldn't resend the invite. Try again.")
+              errorMessage(error, "Couldn't renew the invite. Try again.")
             ),
         }
       );

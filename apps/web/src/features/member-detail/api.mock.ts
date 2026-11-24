@@ -39,7 +39,7 @@ const PROFILE_EXTRAS: Record<
   Pick<MemberProfile, "joinedVia" | "lastSeenAt" | "signIn" | "sport">
 > = {
   [ALINE]: {
-    joinedVia: "with an email invite",
+    joinedVia: "with an invite link",
     lastSeenAt: "2026-11-23T13:42:00Z",
     signIn: "Email and password",
     sport: "basketball",

@@ -140,15 +140,15 @@ export function WelcomeScreen({ email }: { email: string }) {
         </Button>
         <div className="flex flex-col gap-1 rounded-md bg-fog p-4 max-md:hidden">
           <p className="font-semibold text-ink text-sm leading-[18px]">
-            Got an invite email instead?
+            Got an invite link instead?
           </p>
           <p className="text-muted text-sm leading-5">
-            Open it and tap the link. It adds you to the academy. No email and
-            no code? Ask your coach or academy admin for one. {signOutLink}
+            Open it and it adds you to the academy. No link and no code? Ask
+            your coach or academy admin for one. {signOutLink}
           </p>
         </div>
         <p className="text-center text-muted text-sm leading-5 md:hidden">
-          Got an invite email? Open it and tap the link.
+          Got an invite link from your academy? Open it.
           <br />
           No code? Ask your coach or academy admin.
           <br />

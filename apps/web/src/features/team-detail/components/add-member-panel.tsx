@@ -20,6 +20,7 @@ import {
   useAddTeamMember,
 } from "@/features/team-detail/queries";
 import type { Id, Team } from "@/features/types";
+import { useActiveMembership } from "@/features/viewer/queries";
 import { errorMessage, isApiError } from "@/lib/api-client";
 import { initials } from "@/lib/format";
 
@@ -106,12 +107,15 @@ function CandidateRow({
   team,
   pending,
   refused,
+  seesAllRosters,
   onAdd,
 }: {
   candidate: MemberCandidate;
   team: Pick<Team, "id" | "name">;
   pending: boolean;
   refused: boolean;
+  /** Admins read every roster; a coach reads only their own teams'. */
+  seesAllRosters: boolean;
   onAdd: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const other = candidate.currentTeam;
@@ -158,7 +162,8 @@ function CandidateRow({
       </li>
     );
   }
-  let note = "No team yet";
+  // A coach can't see other teams' rosters, so "no team" would be a guess.
+  let note = seesAllRosters ? "No team yet" : "Student";
   if (candidate.role === "coach") {
     note = "Coach";
   }
@@ -213,6 +218,9 @@ export function AddMemberPanel({
 }) {
   const [query, setQuery] = useState(initialQuery);
   const inputId = useId();
+  const membership = useActiveMembership();
+  const seesAllRosters =
+    membership?.academy.id === academyId && membership.roles.includes("admin");
   // A failed search shows under the box (keeping what was typed), not over the page.
   const search = useQuery({
     ...memberSearchQueryOptions(academyId, team.id, memberRole, query),
@@ -301,6 +309,7 @@ export function AddMemberPanel({
               onAdd={handleAdd}
               pending={isPending || offline}
               refused={refused.has(candidate.user.id)}
+              seesAllRosters={seesAllRosters}
               team={team}
             />
           ))}
