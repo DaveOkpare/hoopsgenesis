@@ -202,3 +202,109 @@ export function sessionErrorMessage(error: unknown): string {
   }
   return errorMessage(error);
 }
+
+/** Ended with everyone on the roster marked: "closed out" (CO-5). */
+export function isClosedOut(session: Session): boolean {
+  return (
+    session.status === "closed" &&
+    session.roster.length > 0 &&
+    session.roster.every((e) => e.attendance)
+  );
+}
+
+/** Who wrote the close-out's absent rows, when it was one person. */
+export function closedOutBy(session: Session): { id: Id; name: string } | null {
+  const people = new Map<Id, string>();
+  for (const entry of session.roster) {
+    const by = entry.attendance?.recordedBy;
+    if (entry.attendance?.status === "absent" && by) {
+      people.set(by.id, by.name);
+    }
+  }
+  const [only] = [...people.entries()];
+  return people.size === 1 && only ? { id: only[0], name: only[1] } : null;
+}
+
+export interface StatusTally {
+  absent: number;
+  excused: number;
+  late: number;
+  notMarked: number;
+  present: number;
+}
+
+export function statusTally(session: Session): StatusTally {
+  const tally: StatusTally = {
+    present: 0,
+    late: 0,
+    absent: 0,
+    excused: 0,
+    notMarked: 0,
+  };
+  for (const entry of session.roster) {
+    if (entry.attendance) {
+      tally[entry.attendance.status] += 1;
+    } else {
+      tally.notMarked += 1;
+    }
+  }
+  return tally;
+}
+
+/** "Coach Patrick" from "Patrick Habimana"; "you" for the viewer. */
+export function personLabel(
+  person: { id: Id; name: string } | null,
+  viewerId: Id
+): string {
+  if (!person) {
+    return "a coach";
+  }
+  if (person.id === viewerId) {
+    return "you";
+  }
+  return `Coach ${person.name.split(" ")[0] ?? person.name}`;
+}
+
+/** "Scanned in", "Ticked by Coach Patrick", "Marked by you", "No scan". */
+export function markedBy(entry: SessionEntry, viewerId: Id): string {
+  const row = entry.attendance;
+  if (!row) {
+    return "No scan";
+  }
+  if (row.checkInDistanceM !== null) {
+    return "Scanned in";
+  }
+  if (row.verifiedBy && (row.status === "present" || row.status === "late")) {
+    return `Ticked by ${personLabel(row.verifiedBy, viewerId)}`;
+  }
+  return `Marked by ${personLabel(row.recordedBy, viewerId)}`;
+}
+
+/** "Absent · marked at close-out", "Late · in 15:48 · scanned" (GN5-0 rows). */
+export function reviewLine(
+  entry: SessionEntry,
+  session: Session,
+  viewerId: Id
+): string {
+  const row = entry.attendance;
+  if (!row) {
+    return "Not marked · no scan";
+  }
+  const status = `${row.status.charAt(0).toUpperCase()}${row.status.slice(1)}`;
+  if (row.status === "absent") {
+    return `${status} · marked by ${personLabel(row.recordedBy, viewerId)}`;
+  }
+  if (row.status === "excused") {
+    return row.notes ? `${status} · ${row.notes}` : status;
+  }
+  const parts = [status];
+  if (row.checkInAt) {
+    parts.push(`in ${localTime(new Date(row.checkInAt), session.timeZone)}`);
+  }
+  parts.push(
+    row.checkInDistanceM === null
+      ? `ticked by ${personLabel(row.verifiedBy ?? row.recordedBy, viewerId)}`
+      : "scanned"
+  );
+  return parts.join(" · ");
+}

@@ -28,6 +28,7 @@ import {
   ComingUp,
   FeeDueCard,
   FeeDueNudge,
+  NoTeamCard,
   ResultTile,
   UploadTile,
 } from "@/features/student-home/home-cards";
@@ -47,7 +48,7 @@ import {
   studentRecordsQueryOptions,
 } from "@/features/student-records/queries";
 import type { CalendarEvent, DateOnly, Id } from "@/features/types";
-import { useViewer } from "@/features/viewer/queries";
+import { useActiveMembership, useViewer } from "@/features/viewer/queries";
 import {
   firstName,
   formatLongDate,
@@ -77,8 +78,16 @@ function StudentHome() {
   const session = useQuery(
     nextSessionQueryOptions(academyId, preview, timeZone)
   );
-  const fees = useQuery(myFeesQueryOptions(academyId));
+  // Secondary on Today: if fees fail, the fee card is simply left out.
+  const fees = useQuery({
+    ...myFeesQueryOptions(academyId),
+    throwOnError: false,
+  });
   const due = fees.data?.due ?? null;
+  const membership = useActiveMembership();
+  const academyName = membership?.academy.name ?? "your academy";
+  // On no team yet (spec AGW-0, "Student, no team yet"): nothing to check in to.
+  const noTeam = membership?.teams.length === 0;
 
   return (
     <div className="flex flex-col gap-8 max-md:gap-5">
@@ -100,14 +109,15 @@ function StudentHome() {
         </PageHeading>
       </PageHeader>
 
-      <div className="flex gap-5 max-md:flex-col">
-        {session.status === "pending" ? (
+      <div className="flex gap-5 max-lg:flex-col">
+        {noTeam ? <NoTeamCard academyName={academyName} /> : null}
+        {!noTeam && session.status === "pending" ? (
           <Skeleton className="h-[277px] rounded-lg max-md:h-[254px] md:flex-[1.2]" />
         ) : null}
         {session.data ? (
           <SessionCard session={session.data} timeZone={timeZone} />
         ) : null}
-        {session.data === null ? (
+        {!noTeam && session.data === null ? (
           <section className="flex flex-col gap-2 rounded-lg bg-fog p-7 max-md:p-5 md:flex-[1.2]">
             <h2 className="font-semibold text-ink text-lg leading-6">
               No sessions in the next two weeks
@@ -133,7 +143,7 @@ function StudentHome() {
         />
       </QueryBoundary>
 
-      <div className="flex gap-5 max-md:hidden">
+      <div className="grid grid-cols-2 gap-5 max-md:hidden lg:flex">
         <QueryBoundary className="flex-1" what="your attendance">
           <AttendanceSection academyId={academyId} today={today} />
         </QueryBoundary>

@@ -4,11 +4,13 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell/app-shell";
 import { adminShell } from "@/components/app-shell/nav-config";
 import { outstandingCountQueryOptions } from "@/features/fees/queries";
-import { pendingRecordCountQueryOptions } from "@/features/records/queries";
 import { useActiveMembership } from "@/features/viewer/queries";
 import { hasActiveRole, homePathFor } from "@/features/viewer/selectors";
 
-/** Unpaid students today and records waiting for review, for the sidebar. */
+/**
+ * Unpaid students today, for the sidebar. Records carry no badge for admins: they are
+ * read only there (coaches review them, IGD-0).
+ */
 function useAdminNavCounts() {
   const academyId = useActiveMembership()?.academy.id ?? "";
   // A failed count must never take down the shell: it just shows no badge.
@@ -17,15 +19,9 @@ function useAdminNavCounts() {
     enabled: Boolean(academyId),
     throwOnError: false,
   });
-  const pending = useQuery({
-    ...pendingRecordCountQueryOptions(academyId),
-    enabled: Boolean(academyId),
-    throwOnError: false,
-  });
   // No badge until the real numbers are in.
   return {
     ...(unpaid.data === undefined ? {} : { unpaidFees: unpaid.data }),
-    ...(pending.data === undefined ? {} : { pendingRecords: pending.data }),
   };
 }
 

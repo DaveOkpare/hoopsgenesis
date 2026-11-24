@@ -25,9 +25,12 @@ import {
 } from "@/features/fees/fixtures";
 import {
   addMonths,
+  daysSince,
+  methodLabel,
   type PeriodKey,
   periodDueDate,
   periodKeyOf,
+  periodMonthName,
   periodOf,
   periodStart,
 } from "@/features/fees/periods";
@@ -40,6 +43,7 @@ import {
   users,
 } from "@/features/fixtures";
 import type { Fee, Id, Money, Team, Timestamp } from "@/features/types";
+import { ApiError } from "@/lib/api-client";
 import { formatMoney } from "@/lib/format";
 
 /** Who acts in preview: Sharika, the admin in the designs. */
@@ -147,12 +151,23 @@ function outstandingFor(academyId: Id, period: PeriodKey): OutstandingRow[] {
     while (addMonths(firstUnpaid, months - 1) < period) {
       months += 1;
     }
+    // The designs show every unpaid student with a billed amount.
     rows.push({
       studentId: student.id,
       teamId: student.teamId,
-      amount: (Number(DEFAULT_FEE.amount) * months).toFixed(2),
-      currency: DEFAULT_FEE.currency,
-      dueDate: periodDueDate(firstUnpaid),
+      owed: {
+        amount: (Number(DEFAULT_FEE.amount) * months).toFixed(2),
+        currency: DEFAULT_FEE.currency,
+        estimated: false,
+      },
+      daysOverdue: Math.max(
+        0,
+        daysSince(
+          periodDueDate(firstUnpaid),
+          mockNow(),
+          academyTimezone(academyId)
+        )
+      ),
       lastPaidAt: last?.paidAt ?? null,
       student,
     });
@@ -181,6 +196,20 @@ export async function listFees(
     .map((fee) => toRow(academyId, fee));
 }
 
+/** Real: `GET /api/v1/academies/:academyId/fees/:id`. */
+export async function getFee(academyId: Id, feeId: Id): Promise<PaymentRow> {
+  await fixtureDelay();
+  const fee = feeStore.find((f) => f.id === feeId && f.academyId === academyId);
+  if (!fee) {
+    throw new ApiError({
+      status: 404,
+      code: "not_found",
+      message: "Fee not found",
+    });
+  }
+  return toRow(academyId, fee);
+}
+
 /** Real: `GET /api/v1/academies/:academyId/fees/outstanding?teamId=&on=` (on defaults to today). */
 export async function listOutstandingFees(
   academyId: Id,
@@ -202,7 +231,7 @@ export async function getFeeSummary(academyId: Id): Promise<FeeSummary> {
   const period = currentPeriod(academyId);
   const outstanding = outstandingFor(academyId, period);
   const outstandingTotal = outstanding.reduce(
-    (sum, row) => sum + Number(row.amount),
+    (sum, row) => sum + Number(row.owed?.amount ?? 0),
     0
   );
   return {
@@ -219,6 +248,7 @@ export async function getFeeSummary(academyId: Id): Promise<FeeSummary> {
       amount: outstandingTotal.toFixed(2),
       currency: DEFAULT_FEE.currency,
     },
+    outstandingIsEstimate: false,
     unpaidStudentCount: outstanding.length,
     onlineShare: NOVEMBER_TOTALS.onlineShare,
   };
@@ -286,6 +316,25 @@ export async function recordPayment(
     sessionTotals.collected += Number(fee.amount);
     sessionTotals.paidStudents += 1;
   }
+  const money = formatMoney({ amount: fee.amount, currency: fee.currency });
+  const month = periodMonthName(periodKeyOf(fee.periodStart));
+  appendAuditEntry({
+    academyId,
+    actorId,
+    action: "fee.create",
+    entityType: "fee",
+    entityId: fee.id,
+    before: null,
+    after: {
+      amount: `${fee.amount} ${fee.currency}`,
+      paymentMethod: fee.paymentMethod,
+      paid_at: fee.paidAt?.slice(0, 10) ?? null,
+    },
+    reason: null,
+    subject: { id: fee.studentId, name: nameOf(fee.studentId) ?? "Student" },
+    summary: `${money} · ${month}`,
+    detail: `${methodLabel(fee.paymentMethod)} · ${money} · ${month}`,
+  });
   return fee;
 }
 

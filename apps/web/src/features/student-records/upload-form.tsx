@@ -10,10 +10,16 @@ import {
   type MouseEvent,
   type ReactNode,
   useCallback,
+  useState,
 } from "react";
 import { toast } from "sonner";
 
-import { FilePicker } from "@/features/student-records/file-picker";
+import { useIsOffline } from "@/components/offline";
+
+import {
+  FilePicker,
+  FileUnavailable,
+} from "@/features/student-records/file-picker";
 import {
   type AcademicKind,
   type RecordTemplate,
@@ -164,6 +170,10 @@ export function UploadForm({
 }) {
   const navigate = useNavigate();
   const upload = useUploadRecord();
+  // Set when the server answers 503 storage_not_configured to a file upload.
+  const [storageUnavailable, setStorageUnavailable] = useState(false);
+  // Offline, a send would sit paused (TanStack Query waits for the network).
+  const offline = useIsOffline();
   const templateFor = (k: AcademicKind) =>
     templates.find((template) => template.key === k);
   const kinds = KINDS.filter((k) => templateFor(k));
@@ -173,31 +183,30 @@ export function UploadForm({
     defaultValues: { ...emptyUploadForm, ...initial },
     validators: { onSubmit: uploadSchemaFor(fieldsFor) },
     onSubmit: async ({ value, formApi }) => {
-      if (!value.file) {
-        return;
-      }
       try {
-        const { record, fileSaved } = await upload.mutateAsync({
+        const { record } = await upload.mutateAsync({
           academyId,
           studentId,
-          file: value.file,
+          file: storageUnavailable ? null : value.file,
           recordedOn: today,
           schemaVersion: templateFor(value.kind)?.schemaVersion ?? 1,
           data: recordData(value, fieldsFor(value.kind)),
         });
-        if (fileSaved) {
-          toast.success("Sent for review");
-        } else {
-          // 503 storage_not_configured: the details were saved, the file was not.
-          toast.warning(
-            "Sent for review without the file: file uploads aren’t set up yet. Show your coach the paper copy."
-          );
-        }
+        toast.success("Sent for review");
         await navigate({
           to: "/student/records/$recordId",
           params: { recordId: record.id },
         });
       } catch (error) {
+        if (isApiError(error, "storage_not_configured")) {
+          // Nothing was saved. Drop the file and offer to send without it (FDO-0).
+          setStorageUnavailable(true);
+          formApi.setFieldValue("file", null);
+          toast.warning(
+            "Files can’t be added right now. Send the details without the file, or try again later."
+          );
+          return;
+        }
         const fieldErrors = serverFieldErrors(error);
         for (const [field, message] of fieldErrors) {
           formApi.setFieldMeta(field, (meta) => ({
@@ -262,11 +271,16 @@ export function UploadForm({
       >
         {(field) => {
           const error = errorText(field);
+          const hint = kind === "report_card" ? "numbers" : "details";
+          if (storageUnavailable) {
+            return <FileUnavailable hint={hint} />;
+          }
           return (
             <div className="flex flex-col gap-2">
               <FilePicker
                 describedBy={error ? "file-error" : undefined}
                 file={field.state.value}
+                hint={hint}
                 id="file"
                 invalid={Boolean(error)}
                 onBlur={field.handleBlur}
@@ -429,13 +443,16 @@ export function UploadForm({
       <div className="flex flex-col gap-2">
         <Button
           className="w-full p-4 text-base leading-5"
-          disabled={isSubmitting}
+          disabled={isSubmitting || offline}
           type="submit"
         >
-          {isSubmitting ? "Sending…" : "Send for review"}
+          {offline && !isSubmitting ? "Sending needs a connection" : null}
+          {isSubmitting ? "Sending…" : null}
+          {offline || isSubmitting ? null : "Send for review"}
         </Button>
         <p className="text-center text-[13px] text-muted leading-4">
-          You can edit or delete it until your coach reviews it
+          {/* The design says "edit or delete": only delete is built on web. */}
+          You can delete it until your coach reviews it
         </p>
       </div>
     </form>

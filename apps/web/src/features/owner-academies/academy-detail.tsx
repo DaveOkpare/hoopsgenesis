@@ -134,9 +134,12 @@ function DetailSkeleton({ className }: { className?: string }) {
 export function AcademyDetail({
   academyId,
   className,
+  variant = "panel",
 }: {
   academyId: Id;
   className?: string;
+  /** panel: the console's side panel (name inside). page: tablet page, name above. */
+  variant?: "panel" | "page";
 }) {
   const { data: detail } = useQuery(platformAcademyQueryOptions(academyId));
   if (detail === undefined) {
@@ -171,7 +174,10 @@ export function AcademyDetail({
     >
       <div className="flex flex-col gap-1">
         <h2
-          className="font-semibold text-ink text-lg leading-[22px]"
+          className={cn(
+            "font-semibold text-ink text-lg leading-[22px]",
+            variant === "page" && "sr-only"
+          )}
           id="academy-detail-title"
         >
           {academy.name}
@@ -231,6 +237,7 @@ export function AcademyDetail({
         <div className="flex border-line border-t pt-[10px]">
           <Link
             className="font-semibold text-ink text-sm leading-[18px] underline decoration-1 underline-offset-[3px] hover:decoration-2"
+            search={{ academy: academy.id }}
             to="/owner/audit"
           >
             Open full audit log

@@ -5,27 +5,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@hoops-genesis/ui/components/dropdown-menu";
-import {
-  Eyebrow,
-  PageActions,
-  PageHeader,
-  PageHeading,
-  PageTitle,
-} from "@hoops-genesis/ui/components/page-header";
 import { Skeleton } from "@hoops-genesis/ui/components/skeleton";
 import { cn } from "@hoops-genesis/ui/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { type MouseEvent, useCallback } from "react";
+import { type MouseEvent, type ReactNode, useCallback } from "react";
 import { toast } from "sonner";
 
-import { PhoneOnlyNotice } from "@/components/app-shell/phone-nudge-card";
 import { BackIcon, DotsIcon } from "@/components/coach/coach-icons";
 import {
   circleButtonClass,
   PhoneNavRow,
 } from "@/components/coach/phone-nav-row";
+import { ErrorState } from "@/components/error-state";
+import { canManageEvent } from "@/features/events/components/event-detail-screen";
 import { CancelDialog } from "@/features/sessions/components/cancel-dialog";
+import { ChangeDialog } from "@/features/sessions/components/change-dialog";
 import { CheckInDialog } from "@/features/sessions/components/check-in-dialog";
 import {
   MoreTickedRow,
@@ -35,15 +30,27 @@ import {
   useCollapsedTicked,
 } from "@/features/sessions/components/roster";
 import {
+  reviewTitle,
+  rowActions,
+  type SessionActions,
+  SessionWebLive,
+  SessionWebReview,
+} from "@/features/sessions/components/session-web";
+import {
   checkInDescription,
+  closedOutBy,
   closesAtLabel,
   groupSession,
+  isClosedOut,
   opensAtLabel,
+  personLabel,
+  reviewLine,
   type SessionCounts,
   sessionCounts,
   sessionErrorMessage,
   sessionTimes,
   sessionTitle,
+  statusTally,
 } from "@/features/sessions/model";
 import {
   asOfKey,
@@ -51,31 +58,102 @@ import {
   type SessionAcademy,
   type SessionEntry,
   sessionQueryOptions,
-  useCheckOutAttendance,
   useRecordAttendance,
   useUnverifyAttendance,
   useVerifyAttendance,
 } from "@/features/sessions/queries";
 import { formatWeekdayDayMonth } from "@/features/sessions/time";
 import type { DateOnly, Id } from "@/features/types";
-import { isUiPreview } from "@/lib/preview";
+import type { Membership } from "@/features/viewer/api";
+import { ApiError } from "@/lib/api-client";
+import { initials } from "@/lib/format";
 
-export type SessionSheet = "check-in" | "cancel";
+export type SessionSheet = "check-in" | "cancel" | "change";
+export type SessionRole = "admin" | "coach";
 
 interface SessionScreenProps {
   academy: SessionAcademy;
   date?: DateOnly;
   eventId: Id;
+  membership: Membership;
   now: Date;
   onCancelled: (scope: "day" | "series") => void;
   onCloseSheet: () => void;
   onOpenSheet: (sheet: SessionSheet, studentId?: Id) => void;
+  onQuery: (query: string) => void;
+  query: string;
+  sessionRole: SessionRole;
   sheet?: SessionSheet;
   studentId?: Id;
   viewerId: Id;
 }
 
 const PERCENT = 100;
+
+/** Where "back" leads: Today while it is live for a coach, else the event page. */
+function BackTarget({
+  session,
+  sessionRole,
+  variant,
+}: {
+  session: Session;
+  sessionRole: SessionRole;
+  variant: "circle" | "text" | "phone-text";
+}) {
+  const live = session.status === "open" || session.status === "upcoming";
+  const toToday = sessionRole === "coach" && live;
+  const label = toToday ? "Today" : session.event.title;
+  const params = { eventId: session.event.id };
+  const icon =
+    variant === "circle" ? (
+      <BackIcon />
+    ) : (
+      <BackIcon size={variant === "text" ? 14 : 16} />
+    );
+  const className = cn(
+    variant === "circle"
+      ? circleButtonClass
+      : "flex w-fit items-center gap-[6px] rounded-sm font-medium text-[15px] leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ink",
+    variant === "text" && "text-muted hover:text-ink",
+    variant === "phone-text" && "min-h-11 gap-1 text-ink"
+  );
+  const content =
+    variant === "circle" ? (
+      icon
+    ) : (
+      <>
+        {icon}
+        {label}
+      </>
+    );
+  const aria = variant === "circle" ? `Back to ${label}` : undefined;
+  if (toToday) {
+    return (
+      <Link aria-label={aria} className={className} to="/coach">
+        {content}
+      </Link>
+    );
+  }
+  return sessionRole === "admin" ? (
+    <Link
+      aria-label={aria}
+      className={className}
+      params={params}
+      to="/admin/events/$eventId"
+    >
+      {content}
+    </Link>
+  ) : (
+    <Link
+      aria-label={aria}
+      className={className}
+      params={params}
+      to="/coach/events/$eventId"
+    >
+      {content}
+    </Link>
+  );
+}
 
 function StatusBadge({ session }: { session: Session }) {
   const base =
@@ -112,11 +190,9 @@ function StatusBadge({ session }: { session: Session }) {
 function SessionMenu({
   session,
   onCancel,
-  trigger,
 }: {
   session: Session;
   onCancel: () => void;
-  trigger: "circle" | "outline";
 }) {
   const hasCheckIns = session.roster.some((e) => e.attendance);
   const canCancel =
@@ -126,12 +202,7 @@ function SessionMenu({
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="Session actions"
-        className={trigger === "circle" ? circleButtonClass : undefined}
-        render={
-          trigger === "outline" ? (
-            <Button size="icon" variant="outline" />
-          ) : undefined
-        }
+        className={circleButtonClass}
       >
         <DotsIcon />
       </DropdownMenuTrigger>
@@ -190,25 +261,26 @@ function SessionProgress({
   );
 }
 
-function SessionAction({
+function PhoneAction({
   session,
   counts,
-  pending,
+  actions,
   onTickAll,
-  onMarkAbsent,
 }: {
   session: Session;
   counts: SessionCounts;
-  pending: boolean;
+  actions: SessionActions;
   onTickAll: () => void;
-  onMarkAbsent: () => void;
 }) {
+  if (!actions.canManage) {
+    return null;
+  }
   if (session.status === "closed" && counts.remaining > 0) {
     return (
       <Button
         className="w-full p-[13px]"
-        disabled={pending}
-        onClick={onMarkAbsent}
+        disabled={actions.pending}
+        onClick={actions.onMarkAbsent}
         variant="brand"
       >
         Mark {counts.remaining} remaining as absent
@@ -216,11 +288,10 @@ function SessionAction({
     );
   }
   if (session.status === "open" && counts.unticked > 0) {
-    // Ticking is a phone job; the web shows check-ins view only.
     return (
       <Button
-        className="w-full p-[13px] md:hidden"
-        disabled={pending}
+        className="w-full p-[13px]"
+        disabled={actions.pending}
         onClick={onTickAll}
       >
         Tick all checked in ({counts.unticked})
@@ -235,15 +306,15 @@ function CheckedInGroup({
   entries,
   viewerId,
   pendingIds,
+  canManage,
   onToggleTick,
-  onCheckOut,
 }: {
   session: Session;
   entries: SessionEntry[];
   viewerId: Id;
   pendingIds: Set<Id>;
+  canManage: boolean;
   onToggleTick: (event: MouseEvent<HTMLButtonElement>) => void;
-  onCheckOut: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const { visible, hiddenCount, expanded, toggle } =
     useCollapsedTicked(entries);
@@ -263,29 +334,21 @@ function CheckedInGroup({
               entry={entry}
               key={entry.student.id}
               trailing={
-                <span className="flex shrink-0 items-center gap-2">
-                  {/* Check out by hand (POST /attendance/:id/check-out). Not in the
-                      designs, so preview keeps the rows as drawn. */}
-                  {row?.checkInAt && !isUiPreview ? (
-                    <Button
-                      data-attendance-id={row.id}
-                      data-student-name={entry.student.name}
-                      disabled={pendingIds.has(row.id)}
-                      onClick={onCheckOut}
-                      size="xs"
-                      variant="ghost"
-                    >
-                      Check out
-                    </Button>
-                  ) : null}
-                  <TickToggle
-                    canUntick={session.status === "open"}
-                    entry={entry}
-                    onToggle={onToggleTick}
-                    pending={Boolean(row && pendingIds.has(row.id))}
-                    ticked={ticked}
-                  />
-                </span>
+                canManage ? (
+                  <span
+                    className="contents"
+                    data-attendance-id={row?.id}
+                    data-ticked={ticked}
+                  >
+                    <TickControl
+                      canUntick={session.status === "open"}
+                      name={entry.student.name}
+                      onToggle={onToggleTick}
+                      pending={Boolean(row && pendingIds.has(row.id))}
+                      ticked={ticked}
+                    />
+                  </span>
+                ) : null
               }
             />
           );
@@ -300,49 +363,16 @@ function CheckedInGroup({
   );
 }
 
-/** Wraps TickControl so each row passes a stable handler with its id in data-*. */
-function TickToggle({
-  entry,
-  ticked,
-  canUntick,
-  pending,
-  onToggle,
-}: {
-  entry: SessionEntry;
-  ticked: boolean;
-  canUntick: boolean;
-  pending: boolean;
-  onToggle: (event: MouseEvent<HTMLButtonElement>) => void;
-}) {
-  return (
-    <span
-      className="contents"
-      data-attendance-id={entry.attendance?.id}
-      data-ticked={ticked}
-    >
-      <TickControl
-        canUntick={canUntick}
-        name={entry.student.name}
-        onToggle={onToggle}
-        pending={pending}
-        ticked={ticked}
-      />
-    </span>
-  );
-}
-
 function NotYetGroup({
   session,
   entries,
-  onCheckIn,
+  actions,
   onExcuse,
-  pending,
 }: {
   session: Session;
   entries: SessionEntry[];
-  onCheckIn: (event: MouseEvent<HTMLButtonElement>) => void;
+  actions: SessionActions;
   onExcuse: (event: MouseEvent<HTMLButtonElement>) => void;
-  pending: boolean;
 }) {
   if (entries.length === 0) {
     return null;
@@ -363,23 +393,23 @@ function NotYetGroup({
       </RosterGroupLabel>
       <ul className="flex flex-col">
         {entries.map((entry) => {
-          let action: React.ReactNode = null;
-          if (session.status === "open") {
+          let action: ReactNode = null;
+          if (actions.canManage && session.status === "open") {
             action = (
               <Button
                 data-student-id={entry.student.id}
-                onClick={onCheckIn}
+                onClick={actions.onCheckIn}
                 size="sm"
                 variant="outline"
               >
                 Check in
               </Button>
             );
-          } else if (closed) {
+          } else if (actions.canManage && closed) {
             action = (
               <Button
                 data-student-id={entry.student.id}
-                disabled={pending}
+                disabled={actions.pending}
                 onClick={onExcuse}
                 size="sm"
                 variant="outline"
@@ -464,21 +494,267 @@ function SessionSkeleton() {
   );
 }
 
-function SessionMissing() {
+/** Phone, live or ended but not closed out (3O4-0 live, 5IC-0 close out). */
+function PhoneLive({
+  session,
+  sessionRole,
+  counts,
+  viewerId,
+  pendingIds,
+  actions,
+  onToggleTick,
+  onTickAll,
+  onExcuse,
+}: {
+  session: Session;
+  sessionRole: SessionRole;
+  counts: SessionCounts;
+  viewerId: Id;
+  pendingIds: Set<Id>;
+  actions: SessionActions;
+  onToggleTick: (event: MouseEvent<HTMLButtonElement>) => void;
+  onTickAll: () => void;
+  onExcuse: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  const groups = groupSession(session);
+  const subtitle = [sessionTimes(session), session.event.location]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <div className="flex flex-col items-start gap-4">
-      <PageTitle>Session not found</PageTitle>
-      <p className="text-[15px] text-muted leading-5">
-        It may have been cancelled or deleted.
-      </p>
-      <Button render={<Link to="/coach" />} variant="outline">
-        Back to Today
-      </Button>
+    <div className="flex flex-col gap-5">
+      <PhoneNavRow
+        center={<StatusBadge session={session} />}
+        leading={
+          <BackTarget
+            session={session}
+            sessionRole={sessionRole}
+            variant="circle"
+          />
+        }
+        trailing={
+          actions.canManage ? (
+            <SessionMenu onCancel={actions.onOpenCancel} session={session} />
+          ) : undefined
+        }
+      />
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col">
+          <h1 className="font-display text-[36px] text-ink uppercase leading-none">
+            {sessionTitle(session)}
+          </h1>
+          <p className="text-muted text-sm leading-[18px]">{subtitle}</p>
+        </div>
+        <SessionProgress counts={counts} session={session} />
+        <PhoneAction
+          actions={actions}
+          counts={counts}
+          onTickAll={onTickAll}
+          session={session}
+        />
+      </div>
+      <CheckedInGroup
+        canManage={actions.canManage}
+        entries={groups.checkedIn}
+        onToggleTick={onToggleTick}
+        pendingIds={pendingIds}
+        session={session}
+        viewerId={viewerId}
+      />
+      <SimpleGroup
+        entries={groups.checkedOut}
+        label="Checked out"
+        session={session}
+        viewerId={viewerId}
+      />
+      <NotYetGroup
+        actions={actions}
+        entries={groups.notYet}
+        onExcuse={onExcuse}
+        session={session}
+      />
+      <SimpleGroup
+        entries={groups.absentOrExcused}
+        label="Absent or excused"
+        session={session}
+        viewerId={viewerId}
+      />
     </div>
   );
 }
 
-/** Live check-ins (3O4-0), close out (5IC-0) and their sheets (3WI-0, 5KW-0). */
+/** Phone, closed out (GN5-0, HZE-0). */
+function PhoneReview({
+  session,
+  sessionRole,
+  viewerId,
+  actions,
+}: {
+  session: Session;
+  sessionRole: SessionRole;
+  viewerId: Id;
+  actions: SessionActions;
+}) {
+  const tally = statusTally(session);
+  const closer = closedOutBy(session);
+  const tiles = [
+    { label: "Present", value: tally.present, className: "text-success" },
+    { label: "Late", value: tally.late, className: "text-ink" },
+    { label: "Absent", value: tally.absent, className: "text-ink" },
+    { label: "Excused", value: tally.excused, className: "text-ink" },
+  ];
+  const times = session.event.startTime
+    ? `${session.event.startTime} to ${session.event.endTime ?? ""}`
+    : "All day";
+  return (
+    <div className="flex flex-col gap-[18px]">
+      <div className="flex flex-col gap-[10px]">
+        <BackTarget
+          session={session}
+          sessionRole={sessionRole}
+          variant="phone-text"
+        />
+        <p className="font-semibold text-[12px] text-muted uppercase leading-4 tracking-label">
+          {formatWeekdayDayMonth(session.sessionDate)} · {times}
+        </p>
+        <h1 className="font-display text-[44px] text-ink uppercase leading-[44px]">
+          {reviewTitle(session)}
+        </h1>
+        <p className="flex items-center gap-[6px] self-start rounded-full bg-fog px-3 py-[6px] font-semibold text-[13px] text-ink leading-4">
+          <svg aria-hidden="true" height="14" viewBox="0 0 16 16" width="14">
+            <path
+              d="M3.5 8.5l3 3 6-7"
+              fill="none"
+              stroke="#111111"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+            />
+          </svg>
+          {closer
+            ? `Closed out by ${personLabel(closer, viewerId)}`
+            : "Closed out"}
+        </p>
+      </div>
+      <div className="flex gap-2">
+        {tiles.map((tile) => (
+          <div
+            className="flex flex-1 flex-col gap-[2px] rounded-[14px] bg-fog p-3"
+            key={tile.label}
+          >
+            <span
+              className={cn(
+                "font-display text-[28px] leading-[30px]",
+                tile.className
+              )}
+            >
+              {tile.value}
+            </span>
+            <span className="text-[12px] text-muted leading-4">
+              {tile.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <ul className="flex flex-col">
+        {session.roster.map((entry) => {
+          const allowed = rowActions(entry, actions);
+          return (
+            <li
+              className="flex items-center gap-3 border-line border-b py-[11px] last:border-b-0"
+              key={entry.student.id}
+            >
+              <span
+                aria-hidden="true"
+                className="flex size-9 shrink-0 items-center justify-center rounded-full bg-fog font-semibold text-[12px] text-ink leading-4"
+              >
+                {initials(entry.student.name)}
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
+                <span className="truncate font-semibold text-[15px] text-ink leading-5">
+                  {entry.student.name}
+                </span>
+                <span className="text-[13px] text-muted leading-4">
+                  {reviewLine(entry, session, viewerId)}
+                </span>
+              </span>
+              {allowed.change ? (
+                <Button
+                  aria-label={`Change ${entry.student.name}`}
+                  className="h-auto min-h-8 rounded-full px-[9px] py-1 text-[12px] leading-4"
+                  data-student-id={entry.student.id}
+                  onClick={actions.onChange}
+                  variant="secondary"
+                >
+                  Change
+                </Button>
+              ) : null}
+              {!allowed.change && allowed.tick && entry.attendance ? (
+                <Button
+                  className="h-auto min-h-8 rounded-full px-[9px] py-1 text-[12px] leading-4"
+                  data-attendance-id={entry.attendance.id}
+                  onClick={actions.onTickOne}
+                  variant="secondary"
+                >
+                  Tick
+                </Button>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[13px] text-muted leading-[18px]">
+        Changes after close-out go to the activity log.
+      </p>
+    </div>
+  );
+}
+
+/** A cancelled session at any width. */
+function CancelledView({
+  session,
+  sessionRole,
+}: {
+  session: Session;
+  sessionRole: SessionRole;
+}) {
+  return (
+    <div className="flex flex-col gap-6 max-md:gap-[18px]">
+      <div className="flex flex-col gap-[10px]">
+        <span className="max-md:hidden">
+          <BackTarget
+            session={session}
+            sessionRole={sessionRole}
+            variant="text"
+          />
+        </span>
+        <span className="md:hidden">
+          <BackTarget
+            session={session}
+            sessionRole={sessionRole}
+            variant="phone-text"
+          />
+        </span>
+        <p className="font-medium text-muted text-sm uppercase leading-[18px] tracking-label">
+          {formatWeekdayDayMonth(session.sessionDate)} · {sessionTimes(session)}
+        </p>
+        <h1 className="font-display text-display-sm text-muted uppercase leading-[95%] line-through decoration-1 max-md:text-[44px] max-md:leading-[44px]">
+          {sessionTitle(session)}
+        </h1>
+      </div>
+      <p className="max-w-[692px] rounded-[20px] bg-orange-soft p-[18px] text-orange-deep text-sm leading-5">
+        This session is cancelled
+        {session.cancelReason ? ` (${session.cancelReason})` : ""}. It shows
+        struck through on the calendar.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * One session for academy admins and coaches, every state at every width:
+ * phone 3O4-0 (live), 5IC-0 (ended), GN5-0 / HZE-0 (closed out), sheets 3WI-0, 5KW-0;
+ * web 91C-0 (live or still to come), GFQ-0 / HRK-0 (ended, closed out or not).
+ */
 export function SessionScreen(props: SessionScreenProps) {
   const { academy, eventId, date, now } = props;
   const asOf = asOfKey(now);
@@ -488,7 +764,18 @@ export function SessionScreen(props: SessionScreenProps) {
     return <SessionSkeleton />;
   }
   if (data === null) {
-    return <SessionMissing />;
+    return (
+      <ErrorState
+        error={
+          new ApiError({
+            status: 404,
+            code: "not_found",
+            message: "Session not found",
+          })
+        }
+        variant="page"
+      />
+    );
   }
   return <SessionView {...props} session={data} />;
 }
@@ -496,10 +783,14 @@ export function SessionScreen(props: SessionScreenProps) {
 function SessionView({
   session,
   academy,
+  membership,
+  sessionRole,
   viewerId,
   now,
   sheet,
   studentId,
+  query,
+  onQuery,
   onOpenSheet,
   onCloseSheet,
   onCancelled,
@@ -508,10 +799,11 @@ function SessionView({
   const counts = sessionCounts(session, viewerId);
   const academyId = academy.id;
   const verify = useVerifyAttendance(academyId);
-  const checkOut = useCheckOutAttendance(academyId);
   const unverify = useUnverifyAttendance(academyId);
   const record = useRecordAttendance(academyId);
   const asOf = asOfKey(now);
+  const canManage = canManageEvent(membership, session.event.teamId);
+  const isAdmin = membership.roles.includes("admin");
 
   const pendingIds = new Set<Id>();
   if (verify.isPending && verify.variables) {
@@ -522,32 +814,10 @@ function SessionView({
   if (unverify.isPending && unverify.variables) {
     pendingIds.add(unverify.variables.id);
   }
-  if (checkOut.isPending && checkOut.variables) {
-    pendingIds.add(checkOut.variables.id);
-  }
 
   const { mutate: verifyMutate } = verify;
   const { mutate: unverifyMutate } = unverify;
   const { mutate: recordMutate } = record;
-  const { mutate: checkOutMutate } = checkOut;
-
-  const handleCheckOut = useCallback(
-    (event: MouseEvent<HTMLButtonElement>) => {
-      const id = event.currentTarget.dataset.attendanceId;
-      const name = event.currentTarget.dataset.studentName;
-      if (!id) {
-        return;
-      }
-      checkOutMutate(
-        { id },
-        {
-          onSuccess: () => toast.success(`${name ?? "Student"} checked out`),
-          onError: (error) => toast.error(sessionErrorMessage(error)),
-        }
-      );
-    },
-    [checkOutMutate]
-  );
 
   const handleToggleTick = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
@@ -571,6 +841,23 @@ function SessionView({
       }
     },
     [asOf, unverifyMutate, verifyMutate]
+  );
+
+  const handleTickOne = useCallback(
+    (event: MouseEvent<HTMLElement>) => {
+      const id = event.currentTarget.dataset.attendanceId;
+      if (!id) {
+        return;
+      }
+      verifyMutate(
+        { ids: [id], asOf },
+        {
+          onSuccess: () => toast.success("Ticked"),
+          onError: (error) => toast.error(sessionErrorMessage(error)),
+        }
+      );
+    },
+    [asOf, verifyMutate]
   );
 
   const untickedIds = groups.checkedIn
@@ -599,7 +886,8 @@ function SessionView({
         })),
       },
       {
-        onSuccess: (rows) => toast.success(`${rows.length} marked absent`),
+        onSuccess: (rows) =>
+          toast.success(`${rows.length} marked absent. Session closed out.`),
         onError: (error) => toast.error(sessionErrorMessage(error)),
       }
     );
@@ -636,144 +924,104 @@ function SessionView({
     },
     [onOpenSheet]
   );
+  const handleChange = useCallback(
+    (event: MouseEvent<HTMLElement>) => {
+      const id = event.currentTarget.dataset.studentId;
+      if (id) {
+        onOpenSheet("change", id);
+      }
+    },
+    [onOpenSheet]
+  );
   const handleOpenCancel = useCallback(
     () => onOpenSheet("cancel"),
     [onOpenSheet]
   );
 
+  const actions: SessionActions = {
+    canManage,
+    isAdmin,
+    pending: verify.isPending || record.isPending,
+    onChange: handleChange,
+    onCheckIn: handleCheckIn,
+    onMarkAbsent: handleMarkAbsent,
+    onOpenCancel: handleOpenCancel,
+    onTickOne: handleTickOne,
+  };
+
   const checkInEntry =
-    sheet === "check-in"
+    sheet === "check-in" && canManage
       ? (groups.notYet.find((e) => e.student.id === studentId) ?? null)
       : null;
-  const title = sessionTitle(session);
-  const subtitle = [sessionTimes(session), session.event.location]
-    .filter(Boolean)
-    .join(" · ");
-  const actionPending = verify.isPending || record.isPending;
-  return (
-    <div className="flex flex-col gap-5 md:gap-7">
-      <PhoneNavRow
-        center={<StatusBadge session={session} />}
-        leading={
-          <Link
-            aria-label="Back to Today"
-            className={circleButtonClass}
-            to="/coach"
-          >
-            <BackIcon />
-          </Link>
-        }
-        trailing={
-          <SessionMenu
-            onCancel={handleOpenCancel}
-            session={session}
-            trigger="circle"
-          />
-        }
+  const changeEntry =
+    sheet === "change"
+      ? (session.roster.find(
+          (e) => e.student.id === studentId && rowActions(e, actions).change
+        ) ?? null)
+      : null;
+  const closedOut = isClosedOut(session);
+  const ended = session.status === "closed";
+
+  let phone: ReactNode;
+  let web: ReactNode;
+  if (session.status === "cancelled") {
+    phone = <CancelledView session={session} sessionRole={sessionRole} />;
+    web = phone;
+  } else {
+    phone = closedOut ? (
+      <PhoneReview
+        actions={actions}
+        session={session}
+        sessionRole={sessionRole}
+        viewerId={viewerId}
       />
+    ) : (
+      <PhoneLive
+        actions={actions}
+        counts={counts}
+        onExcuse={handleExcuse}
+        onTickAll={handleTickAll}
+        onToggleTick={handleToggleTick}
+        pendingIds={pendingIds}
+        session={session}
+        sessionRole={sessionRole}
+        viewerId={viewerId}
+      />
+    );
+    const back = (
+      <BackTarget session={session} sessionRole={sessionRole} variant="text" />
+    );
+    web = ended ? (
+      <SessionWebReview
+        actions={actions}
+        back={back}
+        session={session}
+        tally={statusTally(session)}
+        viewerId={viewerId}
+      />
+    ) : (
+      <SessionWebLive
+        actions={actions}
+        back={back}
+        checkedIn={[...groups.checkedIn, ...groups.checkedOut].sort((a, b) =>
+          (a.attendance?.checkInAt ?? "").localeCompare(
+            b.attendance?.checkInAt ?? ""
+          )
+        )}
+        counts={counts}
+        notYet={groups.notYet}
+        onQuery={onQuery}
+        query={query}
+        session={session}
+        viewerId={viewerId}
+      />
+    );
+  }
 
-      <div className="flex flex-col gap-3 max-md:hidden">
-        <Link
-          className="flex w-fit items-center gap-1 rounded-sm font-medium text-ink-soft text-sm leading-[18px] outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-ink"
-          to="/coach"
-        >
-          <BackIcon size={14} />
-          Today
-        </Link>
-        <PageHeader>
-          <PageHeading>
-            <Eyebrow>
-              {formatWeekdayDayMonth(session.sessionDate)} · {subtitle}
-            </Eyebrow>
-            <PageTitle>{title}</PageTitle>
-          </PageHeading>
-          <PageActions className="items-center">
-            <StatusBadge session={session} />
-            <SessionMenu
-              onCancel={handleOpenCancel}
-              session={session}
-              trigger="outline"
-            />
-          </PageActions>
-        </PageHeader>
-      </div>
-
-      {session.status === "cancelled" ? (
-        <p className="rounded-[14px] bg-orange-soft px-4 py-3 text-orange-deep text-sm leading-[19px]">
-          This session is cancelled
-          {session.cancelReason ? ` (${session.cancelReason})` : ""}. Students
-          on {session.team?.name ?? "the team"} were notified.
-        </p>
-      ) : null}
-
-      <div className="flex flex-col gap-5 md:flex-row md:items-start">
-        <div className="flex min-w-0 flex-col gap-5 md:flex-1 md:rounded-lg md:border md:border-line md:p-6">
-          <div className="flex flex-col gap-3 md:hidden">
-            <div className="flex flex-col">
-              <h1 className="font-display text-[36px] text-ink uppercase leading-none">
-                {title}
-              </h1>
-              <p className="text-muted text-sm leading-[18px]">{subtitle}</p>
-            </div>
-            <SessionProgress counts={counts} session={session} />
-            <SessionAction
-              counts={counts}
-              onMarkAbsent={handleMarkAbsent}
-              onTickAll={handleTickAll}
-              pending={actionPending}
-              session={session}
-            />
-          </div>
-          <CheckedInGroup
-            entries={groups.checkedIn}
-            onCheckOut={handleCheckOut}
-            onToggleTick={handleToggleTick}
-            pendingIds={pendingIds}
-            session={session}
-            viewerId={viewerId}
-          />
-          <SimpleGroup
-            entries={groups.checkedOut}
-            label="Checked out"
-            session={session}
-            viewerId={viewerId}
-          />
-          <NotYetGroup
-            entries={groups.notYet}
-            onCheckIn={handleCheckIn}
-            onExcuse={handleExcuse}
-            pending={record.isPending}
-            session={session}
-          />
-          <SimpleGroup
-            entries={groups.absentOrExcused}
-            label="Absent or excused"
-            session={session}
-            viewerId={viewerId}
-          />
-        </div>
-
-        <aside className="flex w-[380px] shrink-0 flex-col gap-5 max-md:hidden max-lg:w-[320px]">
-          <div className="flex flex-col gap-4 rounded-lg bg-fog p-5">
-            <SessionProgress counts={counts} session={session} />
-            <SessionAction
-              counts={counts}
-              onMarkAbsent={handleMarkAbsent}
-              onTickAll={handleTickAll}
-              pending={actionPending}
-              session={session}
-            />
-          </div>
-          {session.status === "open" ? (
-            <PhoneOnlyNotice
-              description="Ticking students you can see works best in the app. Here you can watch check-ins come in."
-              title="Tick on your phone"
-              tone="light"
-            />
-          ) : null}
-        </aside>
-      </div>
-
+  return (
+    <>
+      <div className="md:hidden">{phone}</div>
+      <div className="max-md:hidden">{web}</div>
       <CheckInDialog
         academyId={academyId}
         entry={checkInEntry}
@@ -781,13 +1029,23 @@ function SessionView({
         onClose={onCloseSheet}
         session={session}
       />
-      <CancelDialog
+      <ChangeDialog
         academyId={academyId}
-        onCancelled={onCancelled}
+        entry={changeEntry}
+        now={now}
         onClose={onCloseSheet}
-        open={sheet === "cancel"}
         session={session}
+        viewerId={viewerId}
       />
-    </div>
+      {canManage ? (
+        <CancelDialog
+          academyId={academyId}
+          onCancelled={onCancelled}
+          onClose={onCloseSheet}
+          open={sheet === "cancel"}
+          session={session}
+        />
+      ) : null}
+    </>
   );
 }

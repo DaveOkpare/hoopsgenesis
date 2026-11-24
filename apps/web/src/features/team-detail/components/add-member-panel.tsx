@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   type ChangeEvent,
   type MouseEvent,
+  type ReactNode,
   type Ref,
   useCallback,
   useId,
@@ -12,13 +13,14 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { ErrorState } from "@/components/error-state";
+import { useIsOffline } from "@/components/offline";
 import {
   type MemberCandidate,
   memberSearchQueryOptions,
   useAddTeamMember,
 } from "@/features/team-detail/queries";
 import type { Id, Team } from "@/features/types";
-import { errorMessage } from "@/lib/api-client";
+import { errorMessage, isApiError } from "@/lib/api-client";
 import { initials } from "@/lib/format";
 
 function SearchGlyph() {
@@ -55,23 +57,72 @@ const PRONOUN = {
   they: { object: "them", possessive: "Their" },
 } as const;
 
+/**
+ * Better Auth refuses to add a student who is on a team the caller cannot see (a coach
+ * only sees their own teams' rosters): "A student can be on only one team per academy".
+ */
+const ONE_TEAM_REFUSAL = /only one team/i;
+
+function isOneTeamRefusal(error: unknown): boolean {
+  return (
+    isApiError(error) &&
+    (ONE_TEAM_REFUSAL.test(error.message) || error.code.includes("ONE_TEAM"))
+  );
+}
+
+/** Orange card, no button: the move is an admin's job (AGW-0 "say who will act"). */
+function RefusedRow({
+  candidate,
+  team,
+  avatar,
+}: {
+  candidate: MemberCandidate;
+  team: Pick<Team, "id" | "name">;
+  avatar: ReactNode;
+}) {
+  return (
+    <li className="flex flex-col gap-[10px] rounded-md bg-orange-soft p-3">
+      <div className="flex items-center gap-3">
+        {avatar}
+        <div className="flex min-w-0 flex-1 flex-col gap-[2px]">
+          <p className="truncate font-semibold text-[15px] text-ink leading-5">
+            {candidate.user.name}
+          </p>
+          <p className="text-[13px] text-orange-deep leading-4">
+            Already on another team
+          </p>
+        </div>
+      </div>
+      <p className="text-[13px] text-ink-soft leading-[18px]">
+        A student can be on one team only, and you can change only the teams you
+        coach. Ask the academy admin to move them to {team.name}.
+      </p>
+    </li>
+  );
+}
+
 function CandidateRow({
   candidate,
   team,
   pending,
+  refused,
   onAdd,
 }: {
   candidate: MemberCandidate;
   team: Pick<Team, "id" | "name">;
   pending: boolean;
+  refused: boolean;
   onAdd: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const other = candidate.currentTeam;
   const avatar = (
-    <Avatar size={32} tone={other ? "white" : "fog"}>
+    <Avatar size={32} tone={other || refused ? "white" : "fog"}>
       <AvatarFallback>{initials(candidate.user.name)}</AvatarFallback>
     </Avatar>
   );
+  if (refused) {
+    return <RefusedRow avatar={avatar} candidate={candidate} team={team} />;
+  }
   if (other) {
     const words = PRONOUN[candidate.pronoun];
     return (
@@ -168,7 +219,11 @@ export function AddMemberPanel({
     throwOnError: false,
   });
   const add = useAddTeamMember(academyId);
+  // Students the server refused to add (on a team the caller can't see).
+  const [refused, setRefused] = useState<ReadonlySet<Id>>(new Set());
   const { mutate, isPending } = add;
+  // Writes need the server: Add / Move here wait while the phone is offline.
+  const offline = useIsOffline();
   const handleQuery = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value),
     []
@@ -189,8 +244,13 @@ export function AddMemberPanel({
                 ? `${name} moved from ${movedFrom} to ${team.name}`
                 : `${name} added to ${team.name}`
             ),
-          onError: (error) =>
-            toast.error(errorMessage(error, "Couldn't add them. Try again.")),
+          onError: (error) => {
+            if (isOneTeamRefusal(error)) {
+              setRefused((previous) => new Set(previous).add(userId));
+              return;
+            }
+            toast.error(errorMessage(error, "Couldn't add them. Try again."));
+          },
         }
       );
     },
@@ -239,7 +299,8 @@ export function AddMemberPanel({
               candidate={candidate}
               key={candidate.user.id}
               onAdd={handleAdd}
-              pending={isPending}
+              pending={isPending || offline}
+              refused={refused.has(candidate.user.id)}
               team={team}
             />
           ))}

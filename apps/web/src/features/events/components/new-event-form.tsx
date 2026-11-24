@@ -56,7 +56,7 @@ const schema = z
       .trim()
       .min(1, "Give the event a name")
       .max(TITLE_MAX, "Keep the name under 80 characters"),
-    eventType: z.enum(["training", "match", "camp", "other"]),
+    eventType: z.string().min(1),
     teamId: z.string().min(1, "Pick a team"),
     date: z.string().min(1, "Pick a date"),
     endDate: z.string(),
@@ -80,6 +80,10 @@ const schema = z
   });
 
 type FormValues = z.input<typeof schema>;
+export type EventFormValues = z.output<typeof schema>;
+
+/** create: the new-event page. edit-one: one event. edit-series: every date still to come. */
+export type EventFormMode = "create" | "edit-one" | "edit-series";
 
 /** One date per week from `date` until `until` (inclusive); just `date` when not repeating. */
 export function weeklyDates(date: DateOnly, until: DateOnly | ""): DateOnly[] {
@@ -141,9 +145,11 @@ function TitleField({ field }: { field: AnyFieldApi }) {
 
 function TypeField({
   field,
+  types,
   onTypeChange,
 }: {
   field: AnyFieldApi;
+  types: { value: string; label: string }[];
   onTypeChange: (type: EventType) => void;
 }) {
   const handleClick = useCallback(
@@ -157,7 +163,7 @@ function TypeField({
   return (
     <fieldset className="flex flex-wrap gap-[6px]">
       <legend className="sr-only">Event type</legend>
-      {EVENT_TYPES.map((type) => (
+      {types.map((type) => (
         <FilterChip
           className="px-[14px]"
           data-type={type.value}
@@ -418,18 +424,31 @@ function RepeatField({ field, date }: { field: AnyFieldApi; date: DateOnly }) {
 
 const selectSubmit = (state: { isSubmitting: boolean }) => state.isSubmitting;
 
-/** New event (CO-2, 3QV-0). */
+/**
+ * New event (CO-2, 3QV-0), also used to edit one (`mode` edit-one / edit-series with
+ * `initial` and `onSave`). Editing has no "Repeat weekly"; a series edit has no dates.
+ */
 export function NewEventForm({
   academyId,
   teams,
   defaults,
   onCreated,
+  mode = "create",
+  initial,
+  onSave,
+  saveLabel,
 }: {
   academyId: Id;
   teams: Pick<Team, "id" | "name">[];
   defaults: { teamId?: Id; date: DateOnly; today: DateOnly };
-  onCreated: (firstDate: DateOnly) => void;
+  onCreated?: (firstDate: DateOnly) => void;
+  mode?: EventFormMode;
+  initial?: Partial<FormValues>;
+  /** Edit modes: saves the values; throw to keep the form open. */
+  onSave?: (values: EventFormValues) => Promise<void>;
+  saveLabel?: string;
 }) {
+  const editing = mode !== "create";
   // Only suggestions for the place field ("Court 1" otherwise): a failure must not
   // replace a half-filled form with an error.
   const locations = useQuery({
@@ -451,17 +470,22 @@ export function NewEventForm({
       location: "Court 1",
       collectAttendance: true,
       repeatUntil: "",
+      ...initial,
     } as FormValues,
     validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
       const parsed = schema.parse(value);
+      if (editing) {
+        await onSave?.(parsed).catch(() => undefined);
+        return;
+      }
       const dates = weeklyDates(parsed.date, parsed.repeatUntil);
       try {
         await mutateAsync({
           dates,
           event: {
             title: parsed.title,
-            eventType: parsed.eventType,
+            eventType: parsed.eventType as EventType,
             teamId: parsed.teamId,
             startDate: parsed.date,
             endDate: parsed.endDate || undefined,
@@ -476,7 +500,7 @@ export function NewEventForm({
             ? `${dates.length} sessions created`
             : "Event created"
         );
-        onCreated(parsed.date);
+        onCreated?.(parsed.date);
       } catch (error) {
         toast.error(eventErrorMessage(error));
       }
@@ -490,10 +514,12 @@ export function NewEventForm({
 
   const handleTypeChange = useCallback(
     (type: EventType) => {
-      // "Take attendance" is on by default for training only.
-      form.setFieldValue("collectAttendance", type === "training");
+      // "Take attendance" is on by default for training only (new events).
+      if (!editing) {
+        form.setFieldValue("collectAttendance", type === "training");
+      }
     },
-    [form]
+    [editing, form]
   );
   const handleSubmit = useCallback(
     (event: FormEvent) => {
@@ -505,10 +531,31 @@ export function NewEventForm({
   );
 
   const teamItems = teams.map((t) => ({ value: t.id, label: t.name }));
-  const locationItems = (locations.data ?? ["Court 1"]).map((l) => ({
+  const knownLocations = new Set(locations.data ?? ["Court 1"]);
+  if (initial?.location) {
+    knownLocations.add(initial.location);
+  }
+  const locationItems = [...knownLocations].map((l) => ({
     value: l,
     label: l,
   }));
+  const typeItems = EVENT_TYPES.some((t) => t.value === initial?.eventType)
+    ? EVENT_TYPES
+    : [
+        ...EVENT_TYPES,
+        ...(initial?.eventType
+          ? [
+              {
+                value: initial.eventType as EventType,
+                label: `${initial.eventType.charAt(0).toUpperCase()}${initial.eventType.slice(1)}`,
+              },
+            ]
+          : []),
+      ];
+  let submitLabel = count > 1 ? `Create ${count} sessions` : "Create event";
+  if (editing) {
+    submitLabel = saveLabel ?? "Save changes";
+  }
 
   return (
     <form className="flex flex-col gap-5" noValidate onSubmit={handleSubmit}>
@@ -518,7 +565,11 @@ export function NewEventForm({
         </form.Field>
         <form.Field name="eventType">
           {(field) => (
-            <TypeField field={field} onTypeChange={handleTypeChange} />
+            <TypeField
+              field={field}
+              onTypeChange={handleTypeChange}
+              types={typeItems}
+            />
           )}
         </form.Field>
       </div>
@@ -529,15 +580,17 @@ export function NewEventForm({
             <SelectRow field={field} items={teamItems} label="Team" />
           )}
         </form.Field>
-        <form.Field name="date">
-          {(field) => (
-            <DateRow
-              field={field}
-              label={eventType === "camp" ? "First day" : "Date"}
-            />
-          )}
-        </form.Field>
-        {eventType === "camp" ? (
+        {mode === "edit-series" ? null : (
+          <form.Field name="date">
+            {(field) => (
+              <DateRow
+                field={field}
+                label={eventType === "camp" ? "First day" : "Date"}
+              />
+            )}
+          </form.Field>
+        )}
+        {eventType === "camp" && mode !== "edit-series" ? (
           <form.Field name="endDate">
             {(field) => <DateRow field={field} label="Last day" min={date} />}
           </form.Field>
@@ -559,9 +612,11 @@ export function NewEventForm({
         </form.Field>
       </div>
 
-      <form.Field name="repeatUntil">
-        {(field) => <RepeatField date={date} field={field} />}
-      </form.Field>
+      {editing ? null : (
+        <form.Field name="repeatUntil">
+          {(field) => <RepeatField date={date} field={field} />}
+        </form.Field>
+      )}
 
       <form.Subscribe selector={selectSubmit}>
         {(isSubmitting) => (
@@ -570,7 +625,7 @@ export function NewEventForm({
             disabled={isSubmitting}
             type="submit"
           >
-            {count > 1 ? `Create ${count} sessions` : "Create event"}
+            {submitLabel}
           </Button>
         )}
       </form.Subscribe>

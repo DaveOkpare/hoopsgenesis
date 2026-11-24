@@ -7,13 +7,15 @@ import { toast } from "sonner";
 import z from "zod";
 
 import {
+  AuthBackContent,
   AuthIconDisc,
   AuthTitle,
+  authBackClass,
   authLinkClass,
   authSubmitClass,
   ChevronLeftIcon,
-  fogFieldClass,
   MailIcon,
+  whiteFieldClass,
 } from "@/components/auth/auth-parts";
 import { AuthLayout } from "@/components/auth-layout";
 import { FormTextField } from "@/components/form-text-field";
@@ -24,6 +26,7 @@ import { isUiPreview } from "@/lib/preview";
 const RESET_REDIRECT_PATH = "/reset-password";
 const PREVIEW_EMAIL = "aline.u@example.com";
 const TOO_MANY_REQUESTS = 429;
+const RESET_DISABLED = "RESET_PASSWORD_DISABLED";
 
 /** `preview=sent` shows the "Check your email" state in UI preview mode (dev only). */
 const searchSchema = z.object({
@@ -38,12 +41,16 @@ export const Route = createFileRoute("/forgot-password")({
 
 const schema = z.object({ email: z.email("Enter a valid email address") });
 
+type ResetResult = "sent" | "disabled" | "rate_limited" | "failed";
+
 /**
  * Ask Better Auth to email a reset link. The response is the same whether or not the
  * email has an account, and so is what we show, so the page never reveals who exists.
+ * This server has no reset email sender yet and answers RESET_PASSWORD_DISABLED: that
+ * is said plainly, and "Check your email" shows only after a request that succeeded.
  */
-async function requestReset(email: string): Promise<boolean> {
-  let error: { status: number } | null;
+async function requestReset(email: string): Promise<ResetResult> {
+  let error: { code?: string; status: number } | null;
   try {
     ({ error } = await authClient.requestPasswordReset({
       email,
@@ -54,19 +61,24 @@ async function requestReset(email: string): Promise<boolean> {
     error = { status: 0 };
   }
   if (!error) {
-    return true;
+    return "sent";
   }
-  toast.error(
-    error.status === TOO_MANY_REQUESTS
-      ? "Too many tries. Wait a minute and try again."
-      : "Couldn't send the link right now. Try again in a few minutes."
-  );
-  return false;
+  if (error.code === RESET_DISABLED) {
+    return "disabled";
+  }
+  return error.status === TOO_MANY_REQUESTS ? "rate_limited" : "failed";
 }
 
+const FAILURE_COPY: Record<Exclude<ResetResult, "sent">, string> = {
+  disabled:
+    "Reset links by email aren't switched on yet, so nothing was sent. Ask your academy admin to help you get back in.",
+  rate_limited: "Too many tries. Wait a minute and try again.",
+  failed: "Couldn't send the link right now. Try again in a few minutes.",
+};
+
 /*
- * Reset password. Request step: no artboard, same language as sign in (62I-0 / 62K-0).
- * Sent step: "Check your email" (62M-0).
+ * Reset password. Request step: 87S-0 (web) / 88Y-0 (phone).
+ * Sent step: "Check your email" (62M-0), only after a request that succeeded.
  */
 function ForgotPasswordPage() {
   const { preview } = Route.useSearch();
@@ -95,13 +107,19 @@ const backButtonClass =
   "flex size-9 shrink-0 items-center justify-center rounded-full bg-fog text-ink outline-none hover:bg-stone/60 focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2";
 
 function RequestForm({ onSent }: { onSent: (email: string) => void }) {
+  const [failure, setFailure] = useState<Exclude<ResetResult, "sent"> | null>(
+    null
+  );
   const form = useForm({
     defaultValues: { email: "" },
     onSubmit: async ({ value }) => {
       const email = value.email.trim();
-      if (await requestReset(email)) {
+      const result = await requestReset(email);
+      if (result === "sent") {
         onSent(email);
+        return;
       }
+      setFailure(result);
     },
     validators: { onSubmit: schema },
   });
@@ -110,6 +128,7 @@ function RequestForm({ onSent }: { onSent: (email: string) => void }) {
     (event: FormEvent) => {
       event.preventDefault();
       event.stopPropagation();
+      setFailure(null);
       form.handleSubmit();
     },
     [form]
@@ -122,25 +141,22 @@ function RequestForm({ onSent }: { onSent: (email: string) => void }) {
       onSubmit={handleSubmit}
     >
       <div className="flex flex-col gap-[22px]">
-        <Link
-          aria-label="Back to sign in"
-          className={backButtonClass}
-          to="/login"
-        >
-          <ChevronLeftIcon />
+        <Link className={authBackClass} to="/login">
+          <AuthBackContent label="Back to sign in" />
         </Link>
         <div className="flex flex-col gap-2">
-          <AuthTitle>Reset password</AuthTitle>
+          <AuthTitle className="max-md:text-[60px] max-md:leading-[56px]">
+            Reset password
+          </AuthTitle>
           <p className="text-base text-muted leading-[22px]">
-            Enter the email your academy invited. We'll send a link to set a new
-            password.
+            Enter your email and we'll send you a link to set a new password.
           </p>
         </div>
         <form.Field name="email">
           {(field) => (
             <FormTextField
               autoComplete="email"
-              className={fogFieldClass}
+              className={whiteFieldClass}
               field={field}
               inputMode="email"
               label="Email"
@@ -149,6 +165,14 @@ function RequestForm({ onSent }: { onSent: (email: string) => void }) {
             />
           )}
         </form.Field>
+        {failure ? (
+          <p
+            className="rounded-md bg-orange-soft p-[14px] text-ink text-sm leading-5"
+            role="alert"
+          >
+            {FAILURE_COPY[failure]}
+          </p>
+        ) : null}
       </div>
       <div className="flex flex-col gap-[22px] max-md:gap-[14px]">
         <form.Subscribe selector={selectSubmitState}>
@@ -163,10 +187,22 @@ function RequestForm({ onSent }: { onSent: (email: string) => void }) {
             </Button>
           )}
         </form.Subscribe>
-        <p className="text-muted text-sm leading-5 max-md:text-center">
+        <div className="flex flex-col gap-1 rounded-md bg-fog p-4 max-md:hidden">
+          <p className="font-semibold text-ink text-sm leading-[18px]">
+            Remembered it?
+          </p>
+          <p className="text-muted text-sm leading-5">
+            <Link className={authLinkClass} to="/login">
+              Back to sign in
+            </Link>
+            . The link works for 1 hour. Check your spam folder if it doesn't
+            arrive.
+          </p>
+        </div>
+        <p className="text-center text-muted text-sm leading-5 md:hidden">
           Remembered it?{" "}
           <Link className={authLinkClass} to="/login">
-            Sign in
+            Back to sign in
           </Link>
         </p>
       </div>
@@ -179,8 +215,11 @@ function EmailSent({ email, onBack }: { email: string; onBack: () => void }) {
 
   const handleResend = useCallback(async () => {
     setIsResending(true);
-    if (await requestReset(email)) {
+    const result = await requestReset(email);
+    if (result === "sent") {
       toast.success("Sent again. Check your inbox and spam folder.");
+    } else {
+      toast.error(FAILURE_COPY[result]);
     }
     setIsResending(false);
   }, [email]);

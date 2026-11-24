@@ -398,8 +398,7 @@ export async function appointAcademyAdmin(input: {
     return (await mock()).appointAcademyAdmin(input);
   }
   const result = await apiData<
-    | { status: "member" }
-    | { status: "invited"; invitation: { email: string } }
+    { status: "member" } | { status: "invited"; invitation: { email: string } }
   >(ownerAcademyPath(input.academyId, "/admins"), {
     method: "POST",
     body: { userId: input.userId },
@@ -421,7 +420,10 @@ export async function removeAcademyAdmin(input: {
     return (await mock()).removeAcademyAdmin(input);
   }
   await apiData<unknown>(
-    ownerAcademyPath(input.academyId, `/admins/${encodeURIComponent(input.userId)}`),
+    ownerAcademyPath(
+      input.academyId,
+      `/admins/${encodeURIComponent(input.userId)}`
+    ),
     { method: "DELETE" }
   );
 }

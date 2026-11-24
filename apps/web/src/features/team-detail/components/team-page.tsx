@@ -1,5 +1,5 @@
 import { Avatar, AvatarFallback } from "@hoops-genesis/ui/components/avatar";
-import { Button } from "@hoops-genesis/ui/components/button";
+import { Button, buttonVariants } from "@hoops-genesis/ui/components/button";
 import {
   Dialog,
   DialogBody,
@@ -7,12 +7,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@hoops-genesis/ui/components/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@hoops-genesis/ui/components/dropdown-menu";
 import {
   Eyebrow,
   PageActions,
@@ -31,9 +25,8 @@ import {
   TableHeader,
   TableRow,
 } from "@hoops-genesis/ui/components/table";
-import { cn } from "@hoops-genesis/ui/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   type ChangeEvent,
   type MouseEvent,
@@ -42,44 +35,39 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { MoreIcon, PlusIcon } from "@/components/icons";
+import { PlusIcon } from "@/components/icons";
 import { AddMemberPanel } from "@/features/team-detail/components/add-member-panel";
+import { AttendancePercent } from "@/features/team-detail/components/attendance";
+import { ProfileLink } from "@/features/team-detail/components/profile-link";
 import {
-  AttendancePercent,
-  isLowAttendance,
-} from "@/features/team-detail/components/attendance";
+  ageLabel,
+  paidToText,
+  RowMenu,
+  type TeamPageRole,
+} from "@/features/team-detail/components/row-menu";
+import {
+  AdminCompactView,
+  type AdminTeamSheet,
+  CoachCompactView,
+  type CoachTeamTab,
+  RemoveList,
+} from "@/features/team-detail/components/team-compact";
 import {
   type TeamDetail,
   type TeamFeeStatus,
-  type TeamStudent,
   teamDetailQueryOptions,
   useRemoveTeamMember,
 } from "@/features/team-detail/queries";
+import { useBelowLg } from "@/features/team-detail/use-below-lg";
 import type { DateOnly, Id } from "@/features/types";
 import { errorMessage } from "@/lib/api-client";
-import { formatDayMonth, initials } from "@/lib/format";
-import { useIsPhone } from "@/lib/use-is-phone";
+import { initials } from "@/lib/format";
 
-export type TeamPageRole = "coach" | "admin";
+export type { TeamPageRole } from "./row-menu";
+export type { AdminTeamSheet, CoachTeamTab } from "./team-compact";
 
 const COLLAPSED_ROWS = 4;
-
-const AGE_GROUP = /^U(\d+)$/i;
-
-function ageLabel(ageGroup: string | null): string | null {
-  const match = ageGroup?.match(AGE_GROUP);
-  return match ? `Under ${match[1]}` : ageGroup;
-}
-
-function feeText(fee: TeamFeeStatus): string {
-  if (fee.kind === "overdue") {
-    return `Fees ${fee.days} days overdue`;
-  }
-  if (fee.kind === "unpaid") {
-    return "Not paid yet";
-  }
-  return `Paid to ${formatDayMonth(fee.paidTo)}`;
-}
+const SKELETON_ROWS = ["a", "b", "c", "d", "e"] as const;
 
 function FeeCell({ fee }: { fee: TeamFeeStatus }) {
   if (fee.kind === "unpaid") {
@@ -98,51 +86,36 @@ function FeeCell({ fee }: { fee: TeamFeeStatus }) {
   }
   return (
     <span className="text-muted text-sm leading-[18px]">
-      Paid to {formatDayMonth(fee.paidTo)}
+      {paidToText(fee.paidTo)}
     </span>
   );
 }
 
-function RowMenu({
-  student,
-  teamName,
-  viewAs,
-  onRemove,
-  onLogResult,
-}: {
-  student: TeamStudent;
-  teamName: string;
-  viewAs: TeamPageRole;
-  onRemove: (event: MouseEvent<HTMLElement>) => void;
-  onLogResult: (event: MouseEvent<HTMLElement>) => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={`Actions for ${student.user.name}`}
-        className="flex size-8 cursor-pointer items-center justify-center rounded-full text-muted outline-none hover:bg-fog focus-visible:ring-2 focus-visible:ring-ink aria-expanded:bg-fog"
-      >
-        <MoreIcon />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {viewAs === "coach" ? (
-          <DropdownMenuItem
-            data-student-id={student.user.id}
-            onClick={onLogResult}
-          >
-            Log a result
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem
-          data-name={student.user.name}
-          data-user-id={student.user.id}
-          onClick={onRemove}
-          variant="destructive"
-        >
-          Remove from {teamName}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+function BackLink({ viewAs }: { viewAs: TeamPageRole }) {
+  const className =
+    "flex w-fit items-center gap-[6px] rounded-sm font-medium text-ink text-sm leading-[18px] outline-none focus-visible:ring-2 focus-visible:ring-ink";
+  const chevron = (
+    <svg aria-hidden="true" height="14" viewBox="0 0 16 16" width="14">
+      <path
+        d="M10 3L5 8l5 5"
+        fill="none"
+        stroke="#111111"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+  return viewAs === "coach" ? (
+    <Link className={className} to="/coach/teams">
+      {chevron}
+      My teams
+    </Link>
+  ) : (
+    <Link className={className} to="/admin/teams">
+      {chevron}
+      Teams
+    </Link>
   );
 }
 
@@ -199,83 +172,79 @@ function CoachesCard({
 
 function TeamSkeleton() {
   return (
-    <div aria-busy="true" className="flex flex-col gap-7">
+    <div aria-busy="true" className="flex flex-col gap-7 max-lg:gap-5">
       <span className="sr-only">Loading team</span>
       <Skeleton className="h-4 w-72" />
-      <Skeleton className="h-20 w-40" />
-      <div className="flex gap-5">
+      <Skeleton className="h-20 w-40 max-lg:h-[52px]" />
+      <div className="flex gap-5 max-lg:hidden">
         <Skeleton className="h-96 flex-1 rounded-lg" />
-        <Skeleton className="h-96 w-[380px] rounded-lg max-md:hidden" />
+        <Skeleton className="h-96 w-[380px] rounded-lg" />
+      </div>
+      <div className="flex flex-col gap-3 lg:hidden">
+        {SKELETON_ROWS.map((key) => (
+          <Skeleton className="h-14 rounded-md" key={key} />
+        ))}
       </div>
     </div>
   );
 }
 
-/**
- * Team page (4YX-0), shared by /coach/teams/$teamId and /admin/teams/$teamId.
- * Coach: add/move students on their team, fees read-only (CO-7, CO-10).
- * Admin: the same, plus adding coaches (AO-3).
- * Phone (no design): rows become a list and "Add student" opens a bottom sheet.
- */
-export function TeamPage({
-  academyId,
-  teamId,
-  today,
-  viewAs,
-  viewerId,
-  addQuery,
-  onAddQueryChange,
-}: {
+export interface TeamPageProps {
   academyId: Id;
+  /** `?add=`: the add search, open below 1024px as a sheet. */
+  addQuery?: string;
+  onAddQueryChange: (query: string | undefined) => void;
+  /** Admin sheets below 1024px (`?sheet=coaches|remove`). */
+  onSheetChange?: (sheet: AdminTeamSheet | undefined) => void;
+  /** Coach tabs below 1024px (`?tab=`). */
+  onTabChange?: (tab: CoachTeamTab) => void;
+  sheet?: AdminTeamSheet;
+  tab?: CoachTeamTab;
   teamId: Id;
   today: DateOnly;
   viewAs: TeamPageRole;
   viewerId: Id;
-  /** `?add=` — the add search, open on phones as a sheet. */
-  addQuery?: string;
-  onAddQueryChange: (query: string | undefined) => void;
-}) {
+}
+
+/**
+ * Team page, shared by /coach/teams/$teamId and /admin/teams/$teamId.
+ * 1024px and up: 4YX-0 (table, add panel and coaches beside it).
+ * Below 1024px: the phone designs, HAB-0 for coaches (Roster / Sessions / Results) and
+ * 7S4-0 for admins; "Add student" opens a sheet.
+ */
+export function TeamPage(props: TeamPageProps) {
+  const { academyId, teamId, today } = props;
   // A failure throws to the route's error screen: 404 shows "Page not found", 403
   // "No access", anything else "Try again".
   const query = useQuery(teamDetailQueryOptions(academyId, teamId, today));
   if (!query.data) {
     return <TeamSkeleton />;
   }
-  return (
-    <TeamView
-      academyId={academyId}
-      addQuery={addQuery}
-      detail={query.data}
-      onAddQueryChange={onAddQueryChange}
-      viewAs={viewAs}
-      viewerId={viewerId}
-    />
-  );
+  return <TeamView {...props} detail={query.data} />;
 }
 
 function TeamView({
   academyId,
   detail,
+  today,
   viewAs,
   viewerId,
   addQuery,
   onAddQueryChange,
-}: {
-  academyId: Id;
-  detail: TeamDetail;
-  viewAs: TeamPageRole;
-  viewerId: Id;
-  addQuery?: string;
-  onAddQueryChange: (query: string | undefined) => void;
-}) {
+  tab = "roster",
+  onTabChange,
+  sheet,
+  onSheetChange,
+}: TeamPageProps & { detail: TeamDetail }) {
   const { team } = detail;
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
   const addInputRef = useRef<HTMLInputElement>(null);
-  const isPhone = useIsPhone();
+  const compact = useBelowLg();
   const navigate = useNavigate();
   const remove = useRemoveTeamMember(academyId);
   const { mutate: removeMutate } = remove;
+  const removingId = remove.isPending ? remove.variables?.userId : null;
 
   const needle = filter.trim().toLowerCase();
   const matching = needle
@@ -298,19 +267,35 @@ function TeamView({
   );
   const toggleShowAll = useCallback(() => setShowAll((v) => !v), []);
   const handleAddStudent = useCallback(() => {
-    if (isPhone) {
+    if (compact) {
       onAddQueryChange("");
       return;
     }
     addInputRef.current?.focus();
-  }, [isPhone, onAddQueryChange]);
-  const handleSheetChange = useCallback(
+  }, [compact, onAddQueryChange]);
+  const handleAddSheetChange = useCallback(
     (open: boolean) => {
       if (!open) {
         onAddQueryChange(undefined);
       }
     },
     [onAddQueryChange]
+  );
+  const handleOpenSheet = useCallback(
+    (next: AdminTeamSheet) => onSheetChange?.(next),
+    [onSheetChange]
+  );
+  const handleSheetChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        onSheetChange?.(undefined);
+      }
+    },
+    [onSheetChange]
+  );
+  const handleTab = useCallback(
+    (next: CoachTeamTab) => onTabChange?.(next),
+    [onTabChange]
   );
   const handleRemove = useCallback(
     (event: MouseEvent<HTMLElement>) => {
@@ -347,40 +332,65 @@ function TeamView({
 
   return (
     <>
-      <PageHeader className="max-md:flex-col max-md:items-stretch max-md:gap-4">
-        <PageHeading>
-          <Eyebrow>{eyebrow}</Eyebrow>
-          <PageTitle className="text-display-md leading-[74px] max-md:text-[52px] max-md:leading-[50px]">
-            {team.name}
-          </PageTitle>
-        </PageHeading>
-        <PageActions>
-          <Button
-            className="px-[22px] py-3 text-[15px] leading-5 max-md:w-full max-md:py-[15px]"
-            onClick={handleAddStudent}
-          >
-            <PlusIcon />
-            Add student
-          </Button>
-        </PageActions>
-      </PageHeader>
+      <div className="lg:hidden">
+        {viewAs === "coach" ? (
+          <CoachCompactView
+            academyId={academyId}
+            detail={detail}
+            onAddStudent={handleAddStudent}
+            onLogResult={handleLogResult}
+            onRemove={handleRemove}
+            onTabChange={handleTab}
+            tab={tab}
+            today={today}
+          />
+        ) : (
+          <AdminCompactView
+            detail={detail}
+            onAddStudent={handleAddStudent}
+            onOpenSheet={handleOpenSheet}
+            today={today}
+          />
+        )}
+      </div>
 
-      <div className="flex items-start gap-5 max-md:flex-col max-md:items-stretch max-md:gap-6">
-        <section className="flex min-w-0 flex-1 flex-col rounded-lg border border-line p-6 max-md:rounded-none max-md:border-0 max-md:p-0">
-          <div className="flex items-center justify-between gap-4 pb-4 max-md:flex-col max-md:items-stretch max-md:gap-3 max-md:pb-2">
-            <h2 className="font-semibold text-ink text-lg leading-6">
-              Students
-            </h2>
-            <SearchInput
-              aria-label="Search the team"
-              className="w-[220px] py-[9px] max-md:w-full max-md:py-[10px]"
-              onChange={handleFilter}
-              placeholder="Search the team"
-              value={filter}
-            />
-          </div>
+      <div className="flex flex-col gap-7 max-lg:hidden">
+        <div className="flex flex-col gap-4">
+          <BackLink viewAs={viewAs} />
+          <PageHeader>
+            <PageHeading>
+              <Eyebrow>{eyebrow}</Eyebrow>
+              <PageTitle className="text-display-md leading-[74px]">
+                {team.name}
+              </PageTitle>
+            </PageHeading>
+            <PageActions>
+              <Button
+                className="px-[22px] py-3 text-[15px] leading-5"
+                onClick={handleAddStudent}
+              >
+                <PlusIcon />
+                Add student
+              </Button>
+            </PageActions>
+          </PageHeader>
+        </div>
 
-          <div className="max-md:hidden">
+        <div className="flex items-start gap-5">
+          <section className="flex min-w-0 flex-1 flex-col rounded-lg border border-line p-6">
+            <div className="flex items-center justify-between gap-4 pb-4">
+              <h2 className="font-semibold text-ink text-lg leading-6">
+                Students
+              </h2>
+              <SearchInput
+                aria-label="Search the team"
+                className="w-[220px] py-[9px]"
+                onChange={handleFilter}
+                placeholder="Search the team"
+                value={filter}
+              />
+            </div>
+
             <Table>
               <TableHeader className="border-t">
                 <TableRow className="border-b-0">
@@ -400,7 +410,11 @@ function TeamView({
                 {visible.map((student) => (
                   <TableRow key={student.user.id}>
                     <TableCell>
-                      <span className="flex items-center gap-3">
+                      <ProfileLink
+                        className="flex w-fit items-center gap-3 rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ink"
+                        userId={student.user.id}
+                        viewAs={viewAs}
+                      >
                         <Avatar size={32}>
                           <AvatarFallback>
                             {initials(student.user.name)}
@@ -409,7 +423,7 @@ function TeamView({
                         <span className="font-medium text-[15px] text-ink leading-5">
                           {student.user.name}
                         </span>
-                      </span>
+                      </ProfileLink>
                     </TableCell>
                     <TableCell>
                       <AttendancePercent percent={student.attendancePercent} />
@@ -432,96 +446,53 @@ function TeamView({
                 ))}
               </TableBody>
             </Table>
-          </div>
 
-          <ul className="flex flex-col md:hidden">
-            {visible.map((student) => (
-              <li
-                className="flex items-center gap-3 border-line border-b py-3"
-                key={student.user.id}
-              >
-                <Avatar size={36}>
-                  <AvatarFallback>{initials(student.user.name)}</AvatarFallback>
-                </Avatar>
-                <div className="flex min-w-0 flex-1 flex-col gap-[2px]">
-                  <p className="truncate font-semibold text-[15px] text-ink leading-5">
-                    {student.user.name}
-                  </p>
-                  <p className="text-[13px] text-muted leading-4">
-                    <span
-                      className={cn(
-                        isLowAttendance(student.attendancePercent) &&
-                          "font-semibold text-orange-deep"
-                      )}
-                    >
-                      {student.attendancePercent === null
-                        ? "No sessions yet"
-                        : `${student.attendancePercent}% attendance`}
-                    </span>
-                    {" · "}
-                    {student.fee.kind === "paid" ? (
-                      feeText(student.fee)
-                    ) : (
-                      <span className="font-semibold text-orange-deep">
-                        {feeText(student.fee)}
-                      </span>
-                    )}
-                  </p>
-                </div>
-                <RowMenu
-                  onLogResult={handleLogResult}
-                  onRemove={handleRemove}
-                  student={student}
-                  teamName={team.name}
-                  viewAs={viewAs}
-                />
-              </li>
-            ))}
-          </ul>
-
-          {visible.length === 0 ? (
-            <p className="py-6 text-center text-[15px] text-muted leading-5">
-              {needle
-                ? `No one on ${team.name} matches “${filter.trim()}”.`
-                : "No students yet."}
-            </p>
-          ) : null}
-
-          <div className="flex items-center justify-between gap-4 pt-4">
-            <p className="text-muted text-sm leading-[18px]">{footer}</p>
-            {canToggle ? (
-              <Button
-                aria-expanded={showAll}
-                className="shrink-0"
-                onClick={toggleShowAll}
-                variant="link"
-              >
-                {showAll ? "Show fewer" : "Show all"}
-              </Button>
+            {visible.length === 0 ? (
+              <p className="py-6 text-center text-[15px] text-muted leading-5">
+                {needle
+                  ? `No one on ${team.name} matches “${filter.trim()}”.`
+                  : "No students yet. Add someone who already joined the academy."}
+              </p>
             ) : null}
-          </div>
-        </section>
 
-        <div className="flex w-[380px] shrink-0 flex-col gap-5 max-md:w-full max-lg:w-[320px]">
-          <AddMemberPanel
-            academyId={academyId}
-            className="rounded-lg border border-line bg-white p-5 shadow-[0_12px_32px_#1111111F] max-md:hidden"
-            initialQuery={isPhone ? "" : (addQuery ?? "")}
-            inputRef={addInputRef}
-            team={team}
-          />
-          <CoachesCard
-            academyId={academyId}
-            detail={detail}
-            viewAs={viewAs}
-            viewerId={viewerId}
-          />
+            <div className="flex items-center justify-between gap-4 pt-4">
+              <p className="text-muted text-sm leading-[18px]">{footer}</p>
+              {canToggle ? (
+                <Button
+                  aria-expanded={showAll}
+                  className="shrink-0"
+                  onClick={toggleShowAll}
+                  variant="link"
+                >
+                  {showAll ? "Show fewer" : "Show all"}
+                </Button>
+              ) : null}
+            </div>
+          </section>
+
+          <div className="flex w-[380px] shrink-0 flex-col gap-5">
+            {compact ? null : (
+              <AddMemberPanel
+                academyId={academyId}
+                className="rounded-lg border border-line bg-white p-5 shadow-[0_12px_32px_#1111111F]"
+                initialQuery={addQuery ?? ""}
+                inputRef={addInputRef}
+                team={team}
+              />
+            )}
+            <CoachesCard
+              academyId={academyId}
+              detail={detail}
+              viewAs={viewAs}
+              viewerId={viewerId}
+            />
+          </div>
         </div>
       </div>
 
       <Dialog
-        onOpenChange={handleSheetChange}
-        open={isPhone && addQuery !== undefined}
+        onOpenChange={handleAddSheetChange}
+        open={compact && addQuery !== undefined}
       >
         <DialogContent>
           <DialogHeader className="sr-only">
@@ -536,6 +507,134 @@ function TeamView({
           </DialogBody>
         </DialogContent>
       </Dialog>
+
+      {viewAs === "admin" ? (
+        <AdminSheets
+          academyId={academyId}
+          detail={detail}
+          onOpenChange={handleSheetChange}
+          onRemove={handleRemove}
+          pendingId={removingId ?? null}
+          sheet={sheet}
+          viewerId={viewerId}
+        />
+      ) : null}
     </>
+  );
+}
+
+/** Admin sheets: "Edit coaches" and "Remove a student…" (7S4-0 ··· menu). */
+function AdminSheets({
+  academyId,
+  detail,
+  sheet,
+  viewerId,
+  pendingId,
+  onOpenChange,
+  onRemove,
+}: {
+  academyId: Id;
+  detail: TeamDetail;
+  sheet?: AdminTeamSheet;
+  viewerId: Id;
+  pendingId: Id | null;
+  onOpenChange: (open: boolean) => void;
+  onRemove: (event: MouseEvent<HTMLElement>) => void;
+}) {
+  const { team } = detail;
+  return (
+    <>
+      <Dialog onOpenChange={onOpenChange} open={sheet === "coaches"}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Coaches of {team.name}</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="gap-5 pb-9">
+            <CoachRemoveList
+              detail={detail}
+              onRemove={onRemove}
+              pendingId={pendingId}
+              viewerId={viewerId}
+            />
+            <AddMemberPanel
+              academyId={academyId}
+              className="border-line border-t pt-4"
+              headingLevel="h3"
+              memberRole="coach"
+              team={team}
+              title={`Add a coach to ${team.name}`}
+            />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+      <Dialog onOpenChange={onOpenChange} open={sheet === "remove"}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove a student from {team.name}</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="gap-3 pb-9">
+            <p className="text-muted text-sm leading-[18px]">
+              They stay in the academy, with no team. Their past attendance
+              stays with {team.name}.
+            </p>
+            <RemoveList
+              detail={detail}
+              onRemove={onRemove}
+              pendingId={pendingId}
+            />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** The team's coaches with a Remove button each (admin "Edit coaches" sheet). */
+function CoachRemoveList({
+  detail,
+  viewerId,
+  pendingId,
+  onRemove,
+}: {
+  detail: TeamDetail;
+  viewerId: Id;
+  pendingId: Id | null;
+  onRemove: (event: MouseEvent<HTMLElement>) => void;
+}) {
+  if (detail.coaches.length === 0) {
+    return (
+      <p className="font-semibold text-orange-deep text-sm leading-[18px]">
+        No coach yet. Add one below.
+      </p>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-3">
+      {detail.coaches.map((coach) => (
+        <li className="flex items-center gap-3" key={coach.user.id}>
+          <Avatar size={32} tone={coach.user.id === viewerId ? "ink" : "fog"}>
+            <AvatarFallback>{initials(coach.user.name)}</AvatarFallback>
+          </Avatar>
+          <span className="min-w-0 flex-1 truncate font-medium text-[15px] text-ink leading-5">
+            {coach.user.name}
+            {coach.user.id === viewerId ? " (you)" : ""}
+          </span>
+          <button
+            className={buttonVariants({
+              size: "xs",
+              variant: "destructive-outline",
+              className: "shrink-0 px-3",
+            })}
+            data-name={coach.user.name}
+            data-user-id={coach.user.id}
+            disabled={pendingId === coach.user.id}
+            onClick={onRemove}
+            type="button"
+          >
+            Remove<span className="sr-only"> {coach.user.name}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }

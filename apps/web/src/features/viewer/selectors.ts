@@ -90,16 +90,16 @@ export function academyChipLabel(membership: Membership): string {
   return shortName;
 }
 
-export type AppHome = "/owner" | "/admin" | "/coach" | "/student" | "/join";
+export type AppHome = "/owner" | "/admin" | "/coach" | "/student" | "/welcome";
 
-/** Where to land after sign-in. Someone in no academy yet goes to /join for a code. */
+/** Where to land after sign-in. Someone in no academy yet goes to /welcome (89U-0). */
 export function homePathFor(viewer: Viewer): AppHome {
   if (isOwner(viewer)) {
     return "/owner";
   }
   const membership = getActiveMembership(viewer);
   if (!membership) {
-    return "/join";
+    return "/welcome";
   }
   return `/${primaryRole(membership)}`;
 }

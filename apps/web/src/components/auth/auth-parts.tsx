@@ -47,6 +47,50 @@ export const whiteFieldClass = cn(
 export const lockedFieldClass =
   "cursor-default py-3 text-ink-soft focus-visible:border-transparent focus-visible:bg-fog";
 
+/**
+ * "Back" at the top of an auth page: a text link with a small chevron on the web
+ * (6WQ-0, 6WR-0, 87S-0, 9G0-0), a 40px fog circle on phones (6WS-0, 88Y-0, 9KQ-0).
+ * Put it on a <Link> or <button> and render <AuthBackContent label="…" /> inside.
+ */
+export const authBackClass =
+  "flex w-fit shrink-0 cursor-pointer items-center gap-2 rounded-sm pb-[6px] font-medium text-[15px] text-ink-soft leading-[18px] outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 max-md:size-10 max-md:justify-center max-md:rounded-full max-md:bg-fog max-md:pb-0 max-md:text-ink max-md:hover:bg-stone/60";
+
+export function AuthBackContent({ label }: { label: string }) {
+  return (
+    <>
+      <svg
+        aria-hidden="true"
+        className="max-md:hidden"
+        fill="none"
+        height="14"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+        viewBox="0 0 14 14"
+        width="14"
+      >
+        <path d="M8.5 3L4.5 7l4 4" />
+      </svg>
+      <svg
+        aria-hidden="true"
+        className="md:hidden"
+        fill="none"
+        height="16"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+        viewBox="0 0 16 16"
+        width="16"
+      >
+        <path d="M10 3.5L5.5 8l4.5 4.5" />
+      </svg>
+      <span className="max-md:sr-only">{label}</span>
+    </>
+  );
+}
+
 /* Icons drawn as in Paper. */
 
 export function EyeIcon({ className }: { className?: string }) {

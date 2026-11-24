@@ -98,11 +98,12 @@ export function academicTitle(data: AcademicData): string {
   return data.title ?? ACADEMIC_KIND_LABEL[data.kind];
 }
 
-/** Academy admins by name ("Sharika D."), coaches as "Coach Patrick". */
+/**
+ * Coaches as "Coach Patrick" (an admin who also coaches too: "Coach Sharika", as in
+ * 47V-0 and G0D-0, since every caller names someone acting as a coach: logging,
+ * verifying, ticking in); everyone else by name ("Sharika D.").
+ */
 export function personLabel(person: PersonRef): string {
-  if (person.roles.includes("admin")) {
-    return person.name;
-  }
   if (person.roles.includes("coach")) {
     return `Coach ${firstName(person.name)}`;
   }

@@ -6,8 +6,10 @@ import { MobileTabBar } from "@/components/app-shell/mobile-tab-bar";
 import type { ShellConfig } from "@/components/app-shell/nav-config";
 import { type NavCounts, Sidebar } from "@/components/app-shell/sidebar";
 import { TabletTopBar } from "@/components/app-shell/tablet-nav";
+import { OfflineBanner } from "@/components/offline";
 import { ShellContent } from "@/components/page-frame";
 import { useViewer } from "@/features/viewer/queries";
+import { getActiveMembership } from "@/features/viewer/selectors";
 
 /*
  * Shell for every signed-in role (template "[Template] Admin shell"; spec "Responsive
@@ -42,6 +44,7 @@ export function AppShell({
       )}
     >
       {impersonating ? <ImpersonationBanner /> : null}
+      <OfflineBanner timeZone={getActiveMembership(viewer)?.academy.timezone} />
       <TabletTopBar config={config} counts={counts} />
       <div className="flex flex-1">
         <Sidebar config={config} counts={counts} />

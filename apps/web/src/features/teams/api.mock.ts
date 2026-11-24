@@ -114,7 +114,7 @@ export async function listStudentsWithoutTeam(
         m.roles.includes("student") &&
         m.teamIds.length === 0
     )
-    .map((m) => ({ user: m.user }));
+    .map((m) => ({ user: m.user, joinedAt: m.createdAt }));
 }
 
 /**

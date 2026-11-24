@@ -98,7 +98,7 @@ export function TodayScreen({
           </Eyebrow>
           <PageTitle className="max-md:text-display-sm max-md:leading-[95%]">
             <span className="max-md:hidden">
-              {greeting(now, timeZone)}, {firstName(viewerName)}
+              {greeting(now, timeZone)}, Coach {firstName(viewerName)}
             </span>
             <span className="md:hidden">Today</span>
           </PageTitle>

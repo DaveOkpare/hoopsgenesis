@@ -1,20 +1,10 @@
-import { Avatar, AvatarFallback } from "@hoops-genesis/ui/components/avatar";
 import { Button } from "@hoops-genesis/ui/components/button";
-import { CountryDot } from "@hoops-genesis/ui/components/chip";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
 } from "@hoops-genesis/ui/components/empty";
-import {
-  List,
-  ListRow,
-  ListRowChevron,
-  ListRowContent,
-  ListRowDescription,
-  ListRowTitle,
-} from "@hoops-genesis/ui/components/list";
 import {
   Eyebrow,
   PageHeader,
@@ -23,122 +13,47 @@ import {
 } from "@hoops-genesis/ui/components/page-header";
 import { Skeleton } from "@hoops-genesis/ui/components/skeleton";
 import { cn } from "@hoops-genesis/ui/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type ChangeEvent, useCallback } from "react";
-import { toast } from "sonner";
 
+import { OwnerPhoneBar } from "@/components/owner/owner-phone-bar";
+import {
+  DEFAULT_PER_PAGE,
+  Pager,
+  type PerPage,
+  ShowMore,
+} from "@/components/owner/pager";
+import { platformAcademiesQueryOptions } from "@/features/owner-academies/queries";
 import { BanDialog } from "@/features/owner-users/ban-dialog";
 import {
   type PlatformUser,
-  type PlatformUserMembership,
   platformUsersQueryOptions,
-  useForgetOwnerQueries,
-  useImpersonateUser,
-  useRevokeUserSessions,
   userSessionsQueryOptions,
 } from "@/features/owner-users/queries";
-import type { AcademyRole, Country } from "@/features/types";
-import { roleLabel } from "@/features/viewer/selectors";
-import { errorMessage } from "@/lib/api-client";
 import {
-  firstName,
-  formatRelativeDay,
-  formatTime,
-  initials,
-} from "@/lib/format";
-import { appNow } from "@/lib/preview";
+  ACCOUNT_ACTIONS_NOTE,
+  DetailRow,
+  devicesText,
+  EyeIcon,
+  FALLBACK_TIMEZONE,
+  formatJoined,
+  lastSeenText,
+  MembershipChips,
+  plural,
+  roleSummary,
+  UserAvatar,
+  useSignOutEverywhere,
+} from "@/features/owner-users/user-parts";
+import { useViewAs } from "@/features/owner-users/view-as";
+import { firstName } from "@/lib/format";
 
 export interface UsersSearch {
   dialog?: "ban";
+  page?: number;
+  per?: PerPage;
   q?: string;
   user?: string;
-}
-
-const COUNTRY_BY_TIMEZONE: Record<string, Country> = {
-  "Asia/Kolkata": "india",
-  "Africa/Kigali": "rwanda",
-  "Africa/Kampala": "uganda",
-};
-const FALLBACK_TIMEZONE = "Africa/Kigali";
-
-function membershipLabel(m: PlatformUserMembership): string {
-  const roles = m.roles.map(roleLabel).join(" · ");
-  const team =
-    m.roles.includes("student") && m.teamNames[0] ? ` · ${m.teamNames[0]}` : "";
-  return `${m.academyShortName} · ${roles}${team}`;
-}
-
-function roleSummary(user: PlatformUser): string {
-  const roles = [...new Set(user.memberships.flatMap((m) => m.roles))];
-  if (roles.length === 0) {
-    return "No academy yet";
-  }
-  const [only] = user.memberships;
-  const team =
-    user.memberships.length === 1 &&
-    only?.roles.includes("student") &&
-    only.teamNames[0]
-      ? ` · ${only.teamNames[0]}`
-      : "";
-  return `${roles.map((r: AcademyRole) => roleLabel(r)).join(" · ")}${team}`;
-}
-
-/** "4 Sep" (en-GB would print "4 Sept"). */
-function formatJoined(value: string, timeZone: string): string {
-  const date = new Date(value);
-  const day = new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    timeZone,
-  }).format(date);
-  const month = new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    timeZone,
-  }).format(date);
-  return `${day} ${month}`;
-}
-
-function plural(count: number, one: string, many: string): string {
-  return `${count} ${count === 1 ? one : many}`;
-}
-
-function MembershipChips({ user }: { user: PlatformUser }) {
-  if (user.memberships.length === 0) {
-    return null;
-  }
-  return (
-    <span className="flex flex-wrap gap-[6px]">
-      {user.memberships.map((m) => (
-        <span
-          className="inline-flex items-center gap-[6px] rounded-full bg-fog px-[10px] py-1 text-[13px] text-ink leading-4"
-          key={m.academyId}
-        >
-          <CountryDot country={COUNTRY_BY_TIMEZONE[m.timezone] ?? "rwanda"} />
-          {membershipLabel(m)}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function UserAvatar({
-  user,
-  size,
-  tone,
-}: {
-  user: PlatformUser;
-  size: 44 | 52 | 36;
-  tone: "fog" | "white";
-}) {
-  return (
-    <Avatar
-      className={cn("font-semibold", size === 44 && "text-sm")}
-      size={size}
-      tone={tone}
-    >
-      <AvatarFallback>{initials(user.name)}</AvatarFallback>
-    </Avatar>
-  );
 }
 
 function SearchField({
@@ -155,7 +70,7 @@ function SearchField({
     [onChange]
   );
   return (
-    <label className="flex w-full cursor-text items-center gap-[10px] rounded-md border-2 border-ink bg-white px-5 py-4 max-md:px-4 max-md:py-3">
+    <label className="flex w-full cursor-text items-center gap-[10px] rounded-md border-2 border-ink bg-white px-5 py-4 max-md:rounded-full max-md:border max-md:border-line max-md:px-4 max-md:py-[11px] max-md:focus-within:border-ink">
       <svg
         aria-hidden="true"
         className="shrink-0 text-ink"
@@ -183,7 +98,7 @@ function SearchField({
         <input
           aria-label="Search people by name or email"
           autoComplete="off"
-          className="w-full min-w-0 bg-transparent text-[17px] text-ink leading-[22px] outline-none placeholder:text-muted [&::-webkit-search-cancel-button]:hidden"
+          className="w-full min-w-0 bg-transparent text-[17px] text-ink leading-[22px] outline-none placeholder:text-muted max-md:text-[15px] max-md:leading-5 [&::-webkit-search-cancel-button]:hidden"
           onChange={handleChange}
           placeholder="Search name or email"
           type="search"
@@ -195,10 +110,10 @@ function SearchField({
             aria-hidden="true"
             className="pointer-events-none absolute inset-y-0 left-0 flex max-w-full items-center overflow-hidden whitespace-pre"
           >
-            <span className="invisible text-[17px] leading-[22px]">
+            <span className="invisible text-[17px] leading-[22px] max-md:text-[15px]">
               {value}
             </span>
-            <span className="pl-2 text-[15px] text-muted leading-[18px]">
+            <span className="pl-2 text-[15px] text-muted leading-[18px] max-md:text-[13px]">
               · {plural(resultCount, "result", "results")}
             </span>
           </span>
@@ -213,28 +128,26 @@ function SearchField({
   );
 }
 
+/** Desktop card: selects the person for the side panel. Tablet: opens their page. */
 function UserCard({
   user,
   selected,
   search,
+  opensPage,
 }: {
   user: PlatformUser;
   selected: boolean;
   search: UsersSearch;
+  opensPage: boolean;
 }) {
-  return (
-    <Link
-      aria-current={selected ? "true" : undefined}
-      className={cn(
-        "flex items-center gap-[14px] rounded-md p-4 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2",
-        selected
-          ? "border-2 border-ink"
-          : "border border-line hover:border-stone hover:bg-fog/50"
-      )}
-      replace
-      search={{ q: search.q, user: user.id }}
-      to="/owner/users"
-    >
+  const className = cn(
+    "flex items-center gap-[14px] rounded-md p-4 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2",
+    selected
+      ? "border-2 border-ink p-[15px]"
+      : "border border-line hover:border-stone hover:bg-fog/50"
+  );
+  const body = (
+    <>
       <UserAvatar size={44} tone="fog" user={user} />
       <span className="flex min-w-0 flex-1 flex-col gap-[6px]">
         <span className="flex flex-col">
@@ -252,104 +165,79 @@ function UserCard({
           Banned
         </span>
       ) : null}
+    </>
+  );
+  if (opensPage) {
+    return (
+      <Link
+        className={className}
+        params={{ userId: user.id }}
+        to="/owner/users/$userId"
+      >
+        {body}
+      </Link>
+    );
+  }
+  return (
+    <Link
+      aria-current={selected ? "true" : undefined}
+      className={className}
+      replace
+      search={{ ...search, user: user.id, dialog: undefined }}
+      to="/owner/users"
+    >
+      {body}
     </Link>
   );
 }
 
-function UserListRow({
-  user,
-  search,
-}: {
-  user: PlatformUser;
-  search: UsersSearch;
-}) {
+function UserPhoneRow({ user }: { user: PlatformUser }) {
   return (
-    <ListRow
-      className="items-start"
-      render={
-        <Link search={{ q: search.q, user: user.id }} to="/owner/users" />
-      }
-    >
-      <UserAvatar size={44} tone="fog" user={user} />
-      <ListRowContent className="gap-[6px]">
-        <span className="flex flex-col gap-[2px]">
-          <ListRowTitle>{user.name}</ListRowTitle>
-          <ListRowDescription className="truncate">
-            {user.banned ? (
-              <span className="font-semibold text-orange-deep">Banned · </span>
-            ) : null}
-            {user.email}
-          </ListRowDescription>
-        </span>
-        <MembershipChips user={user} />
-      </ListRowContent>
-      <ListRowChevron className="mt-3" />
-    </ListRow>
-  );
-}
-
-function lastSeenText(
-  updatedAt: string | undefined,
-  timeZone: string
-): string | null {
-  if (!updatedAt) {
-    return null;
-  }
-  const day = formatRelativeDay(updatedAt, timeZone, appNow());
-  const lowered =
-    day === "Today" || day === "Yesterday" ? day.toLowerCase() : day;
-  return `last seen ${lowered} ${formatTime(updatedAt, timeZone)}`;
-}
-
-function DetailRow({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "alert";
-}) {
-  return (
-    <div className="flex justify-between gap-4 border-line border-b py-[11px] last:border-b-0">
-      <dt className="text-muted text-sm leading-[18px]">{label}</dt>
-      <dd
-        className={cn(
-          "text-right font-medium text-ink text-sm leading-[18px]",
-          tone === "alert" && "font-semibold text-orange-deep"
-        )}
+    <li>
+      <Link
+        className="flex items-start gap-3 border-line border-b py-[14px] outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-inset"
+        params={{ userId: user.id }}
+        to="/owner/users/$userId"
       >
-        {value}
-      </dd>
-    </div>
+        <UserAvatar size={44} tone="fog" user={user} />
+        <span className="flex min-w-0 flex-1 flex-col gap-[6px]">
+          <span className="flex flex-col gap-[2px]">
+            <span className="truncate font-semibold text-[15px] text-ink leading-5">
+              {user.name}
+            </span>
+            <span className="truncate text-muted text-sm leading-[18px]">
+              {user.banned ? (
+                <span className="font-semibold text-orange-deep">
+                  Banned ·{" "}
+                </span>
+              ) : null}
+              {user.email}
+            </span>
+          </span>
+          <MembershipChips user={user} />
+        </span>
+        <svg
+          aria-hidden="true"
+          className="mt-3 shrink-0"
+          height="16"
+          viewBox="0 0 14 14"
+          width="16"
+        >
+          <path
+            d="M5.5 3l4 4-4 4"
+            fill="none"
+            stroke="#6B6B6B"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.6"
+          />
+        </svg>
+      </Link>
+    </li>
   );
 }
 
-function devicesText(count: number | undefined): string {
-  if (count === undefined) {
-    return "…";
-  }
-  return count === 0 ? "No devices" : plural(count, "device", "devices");
-}
-
-function EyeIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height="16"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      viewBox="0 0 16 16"
-      width="16"
-    >
-      <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" />
-      <circle cx="8" cy="8" r="2" />
-    </svg>
-  );
-}
-
-/** Right-hand panel from "[Owner] Find and support a user"; the whole page on phones. */
+/** Right-hand panel from "[Owner] Find and support a user" (desktop only). */
 function UserPanel({
   user,
   className,
@@ -359,60 +247,24 @@ function UserPanel({
   className?: string;
   onBan: () => void;
 }) {
-  const navigate = useNavigate();
   // Only "last seen" and the device count: left out if it fails.
   const { data: sessions } = useQuery({
     ...userSessionsQueryOptions(user.id),
     throwOnError: false,
   });
-  const revoke = useRevokeUserSessions();
-  const impersonate = useImpersonateUser();
-  const forgetOwnerQueries = useForgetOwnerQueries();
+  const { viewAs, isPending: viewAsPending } = useViewAs();
+  const { signOut, isPending: signOutPending } = useSignOutEverywhere(user);
   const timeZone = user.memberships[0]?.timezone ?? FALLBACK_TIMEZONE;
   const first = firstName(user.name);
   const lastSeen = lastSeenText(sessions?.[0]?.updatedAt, timeZone);
   const deviceCount = sessions?.length ?? 0;
-
-  const viewAs = useCallback(() => {
-    impersonate.mutate(
-      { userId: user.id },
-      {
-        // Preview shows the banner from `?impersonating=1`; for real the session says so.
-        onSuccess: async ({ home }) => {
-          await navigate({
-            href: home === "/app" ? home : `${home}?impersonating=1`,
-          });
-          forgetOwnerQueries();
-        },
-        onError: (error) =>
-          toast.error(
-            errorMessage(error, "Couldn't start viewing as them. Try again.")
-          ),
-      }
-    );
-  }, [impersonate, navigate, user.id, forgetOwnerQueries]);
-
-  const signOutEverywhere = useCallback(() => {
-    revoke.mutate(
-      { userId: user.id },
-      {
-        onSuccess: ({ revoked }) =>
-          toast.success(
-            `${first} is signed out on ${plural(revoked, "device", "devices")}`
-          ),
-        onError: (error) =>
-          toast.error(
-            errorMessage(error, "Couldn't sign them out. Try again.")
-          ),
-      }
-    );
-  }, [revoke, user.id, first]);
+  const handleViewAs = useCallback(() => viewAs(user.id), [viewAs, user.id]);
 
   return (
     <section
       aria-labelledby="user-panel-title"
       className={cn(
-        "flex flex-col gap-[18px] rounded-[20px] bg-fog p-6 max-md:p-5",
+        "flex flex-col gap-[18px] rounded-[20px] bg-fog p-6",
         className
       )}
     >
@@ -423,7 +275,13 @@ function UserPanel({
             className="font-semibold text-ink text-lg leading-[22px]"
             id="user-panel-title"
           >
-            {user.name}
+            <Link
+              className="underline-offset-[3px] outline-none hover:underline focus-visible:underline"
+              params={{ userId: user.id }}
+              to="/owner/users/$userId"
+            >
+              {user.name}
+            </Link>
           </h2>
           <p className="text-muted text-sm leading-[18px]">
             Joined {formatJoined(user.createdAt, timeZone)}
@@ -438,22 +296,19 @@ function UserPanel({
           value={user.banned ? "Banned" : "Active"}
         />
         {user.banned && user.banReason ? (
-          <DetailRow label="Reason" value={user.banReason} />
+          <DetailRow label="Ban reason" value={user.banReason} />
         ) : null}
         <DetailRow label="Signed in on" value={devicesText(sessions?.length)} />
         <DetailRow label="Role" value={roleSummary(user)} />
       </dl>
       <div className="flex flex-col gap-2">
-        <Button
-          disabled={user.banned || impersonate.isPending}
-          onClick={viewAs}
-        >
+        <Button disabled={user.banned || viewAsPending} onClick={handleViewAs}>
           <EyeIcon />
           View as {first}
         </Button>
         <Button
-          disabled={deviceCount === 0 || revoke.isPending}
-          onClick={signOutEverywhere}
+          disabled={deviceCount === 0 || signOutPending}
+          onClick={signOut}
           variant="outline"
         >
           Sign out everywhere
@@ -467,44 +322,141 @@ function UserPanel({
         </Button>
       </div>
       <p className="text-[13px] text-muted leading-body">
-        Every action here is written to the platform audit log with your name.
+        {ACCOUNT_ACTIONS_NOTE}{" "}
+        <Link
+          className="font-semibold text-ink underline underline-offset-[3px]"
+          params={{ userId: user.id }}
+          to="/owner/users/$userId"
+        >
+          Open their page
+        </Link>
       </p>
     </section>
   );
 }
 
+function UsersHeader({
+  total,
+  academyCount,
+}: {
+  total: number | undefined;
+  academyCount: number | undefined;
+}) {
+  const people = total === undefined ? null : plural(total, "person", "people");
+  const academies =
+    academyCount === undefined
+      ? ""
+      : ` · ${plural(academyCount, "academy", "academies")}`;
+  return (
+    <>
+      <OwnerPhoneBar />
+      <PageHeader>
+        <PageHeading>
+          <Eyebrow className="max-md:hidden">
+            {people
+              ? `${people} across all academies`
+              : "People across all academies"}
+          </Eyebrow>
+          <Eyebrow className="md:hidden">
+            {people ?? "People"}
+            {academies}
+          </Eyebrow>
+          <PageTitle>Users</PageTitle>
+        </PageHeading>
+      </PageHeader>
+    </>
+  );
+}
+
 function ResultsSkeleton() {
   return (
-    <div aria-busy="true" className="flex flex-col gap-2">
+    <div aria-busy="true" className="flex flex-col gap-2" role="status">
+      <span className="sr-only">Loading people</span>
+      <Skeleton className="h-[100px] rounded-md" />
       <Skeleton className="h-[100px] rounded-md" />
       <Skeleton className="h-[100px] rounded-md" />
     </div>
   );
 }
 
-/** "[Owner] Find and support a user" (PA-2). State lives in the URL: q, user, dialog. */
+/**
+ * "[Owner] Find and support a user" (36U-0, PA-2), phone E62-0. State lives in the
+ * URL: q, page, per, user (desktop panel), dialog. Desktop pages with numbers;
+ * tablet and phone grow the list with "Show 25 more" (pages 1..page, each its own
+ * cached query) and open a person on their own page.
+ */
 export function UsersScreen({ search }: { search: UsersSearch }) {
-  const navigate = useNavigate({ from: "/owner/users" });
+  const navigate = useNavigate({ from: "/owner/users/" });
   const q = search.q ?? "";
-  const { data } = useQuery(platformUsersQueryOptions(q));
-  // Only the "N people across all academies" line: left out if it fails.
-  const { data: everyone } = useQuery({
-    ...platformUsersQueryOptions(""),
+  const perPage = search.per ?? DEFAULT_PER_PAGE;
+  const page = search.page ?? 1;
+  const current = useQuery(platformUsersQueryOptions(q, page, perPage));
+  // Tablet and phone show every page up to this one.
+  const pages = useQueries({
+    queries: Array.from({ length: page }, (_, index) =>
+      platformUsersQueryOptions(q, index + 1, perPage)
+    ),
+  });
+  // Only the phone eyebrow's academy count: left out if it fails.
+  const academies = useQuery({
+    ...platformAcademiesQueryOptions(),
     throwOnError: false,
   });
+  const { data } = current;
   const results = data?.users;
+  const grown = pages.flatMap((p) => p.data?.users ?? []);
   const selected =
     results?.find((u) => u.id === search.user) ??
     (search.user ? undefined : results?.[0]);
-  const isPhoneDetail = Boolean(search.user);
+  const matched = data?.matched ?? 0;
+  const pageCount = Math.max(1, Math.ceil(matched / perPage));
 
   const setQuery = useCallback(
     (value: string) =>
       navigate({
-        search: { q: value || undefined },
+        search: (prev) => ({
+          ...prev,
+          q: value || undefined,
+          page: undefined,
+          user: undefined,
+        }),
         replace: true,
       }),
     [navigate]
+  );
+  const setPage = useCallback(
+    (next: number) =>
+      navigate({
+        search: (prev) => ({
+          ...prev,
+          page: next > 1 ? next : undefined,
+          user: undefined,
+        }),
+        replace: true,
+      }),
+    [navigate]
+  );
+  const setPerPage = useCallback(
+    (per: PerPage) =>
+      navigate({
+        search: (prev) => ({
+          ...prev,
+          per: per === DEFAULT_PER_PAGE ? undefined : per,
+          page: undefined,
+          user: undefined,
+        }),
+        replace: true,
+      }),
+    [navigate]
+  );
+  const showMore = useCallback(
+    () =>
+      navigate({
+        search: (prev) => ({ ...prev, page: page + 1 }),
+        replace: true,
+        resetScroll: false,
+      }),
+    [navigate, page]
   );
   const openBan = useCallback(
     () => navigate({ search: (prev) => ({ ...prev, dialog: "ban" as const }) }),
@@ -524,49 +476,34 @@ export function UsersScreen({ search }: { search: UsersSearch }) {
 
   return (
     <>
-      <PageHeader className={cn(isPhoneDetail && "max-md:hidden")}>
-        <PageHeading>
-          <Eyebrow>
-            {everyone
-              ? `${plural(everyone.total, "person", "people")} across all academies`
-              : "People across all academies"}
-          </Eyebrow>
-          <PageTitle>Users</PageTitle>
-        </PageHeading>
-      </PageHeader>
+      <UsersHeader academyCount={academies.data?.length} total={data?.total} />
 
-      {isPhoneDetail ? (
-        <Link
-          className="font-medium text-[13px] text-muted uppercase leading-4 tracking-label md:hidden"
-          search={{ q: search.q }}
-          to="/owner/users"
-        >
-          ← Users
-        </Link>
-      ) : null}
-
-      <search className={cn("w-full", isPhoneDetail && "max-md:hidden")}>
+      <search className="flex w-full flex-col gap-[10px]">
         <SearchField
           onChange={setQuery}
-          resultCount={results ? results.length : null}
+          resultCount={data ? matched : null}
           value={q}
         />
+        {q ? null : (
+          <p className="px-1 text-[13px] text-muted leading-4 md:hidden">
+            Everyone, by name.
+          </p>
+        )}
       </search>
 
       <div className="flex w-full items-start gap-4">
-        <div
-          className={cn(
-            "flex min-w-0 flex-1 flex-col",
-            isPhoneDetail && "max-md:hidden"
-          )}
-        >
+        <div className="flex min-w-0 flex-1 flex-col">
           {results === undefined ? <ResultsSkeleton /> : null}
           {results && results.length === 0 ? (
             <Empty className="rounded-md border border-line border-dashed">
               <EmptyHeader>
-                <EmptyTitle>No one matches “{q}”</EmptyTitle>
+                <EmptyTitle>
+                  {q ? `No one matches “${q}”` : "No one here yet"}
+                </EmptyTitle>
                 <EmptyDescription>
-                  Check the spelling, or search by email instead.
+                  {q
+                    ? "Check the spelling, or search by email instead."
+                    : "People appear here once they sign up."}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -575,11 +512,12 @@ export function UsersScreen({ search }: { search: UsersSearch }) {
             <>
               <ul
                 aria-label="Results"
-                className="flex flex-col gap-2 max-md:hidden"
+                className="flex flex-col gap-2 max-lg:hidden"
               >
                 {results.map((user) => (
                   <li key={user.id}>
                     <UserCard
+                      opensPage={false}
                       search={search}
                       selected={user.id === selected?.id}
                       user={user}
@@ -587,20 +525,52 @@ export function UsersScreen({ search }: { search: UsersSearch }) {
                   </li>
                 ))}
               </ul>
-              <List aria-label="Results" className="md:hidden">
-                {results.map((user) => (
-                  <UserListRow key={user.id} search={search} user={user} />
+              <Pager
+                className="max-lg:hidden"
+                hasNext={page < pageCount}
+                onPage={setPage}
+                onPerPage={setPerPage}
+                page={page}
+                perPage={perPage}
+                shown={results.length}
+                suffix={q ? ` for “${q}”` : null}
+                total={matched}
+              />
+              <ul
+                aria-label="Results"
+                className="flex flex-col gap-2 max-md:hidden lg:hidden"
+              >
+                {grown.map((user) => (
+                  <li key={user.id}>
+                    <UserCard
+                      opensPage
+                      search={search}
+                      selected={false}
+                      user={user}
+                    />
+                  </li>
                 ))}
-              </List>
+              </ul>
+              <ul aria-label="Results" className="flex flex-col md:hidden">
+                {grown.map((user) => (
+                  <UserPhoneRow key={user.id} user={user} />
+                ))}
+              </ul>
+              <ShowMore
+                className="lg:hidden"
+                hasMore={grown.length < matched}
+                onMore={showMore}
+                pending={pages.some((p) => p.isFetching)}
+                shown={grown.length}
+                step={perPage}
+                total={matched}
+              />
             </>
           ) : null}
         </div>
         {selected ? (
           <UserPanel
-            className={cn(
-              "w-[440px] shrink-0 max-md:w-full max-lg:w-[360px]",
-              !isPhoneDetail && "max-md:hidden"
-            )}
+            className="w-[440px] shrink-0 max-lg:hidden"
             onBan={openBan}
             user={selected}
           />

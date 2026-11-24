@@ -9,6 +9,7 @@ const sizes = {
   26: "size-[26px] rounded-full text-[11px] leading-[14px]",
   32: "size-8 rounded-[9px] text-sm leading-[18px]",
   36: "size-9 rounded-[10px] text-base leading-5",
+  40: "size-10 rounded-[10px] text-base leading-5",
   44: "size-11 rounded-[12px] text-[20px] leading-6",
   56: "size-14 rounded-[14px] text-[24px] leading-7",
 } as const;

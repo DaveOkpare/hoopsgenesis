@@ -1,6 +1,7 @@
 import { cn } from "@hoops-genesis/ui/lib/utils";
 
 import { PhoneOnlyNotice } from "@/components/app-shell/phone-nudge-card";
+import { useIsOffline } from "@/components/offline";
 import {
   dayMonth,
   toDateOnly,
@@ -159,45 +160,146 @@ export function SessionCard({
         </div>
       </div>
 
-      {state === "upcoming" ? (
-        <div className="flex flex-col gap-[18px]">
-          <PhoneOnlyNotice
-            description={
-              opensAt
-                ? `Scan the code at the entrance from ${opensAt}. The app checks you are at the academy.`
-                : undefined
-            }
-          />
-          {closesAt ? (
-            <p className="text-center text-[#BDBDBD] text-[13px] leading-4 md:hidden">
-              Check-in is open until {closesAt}
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-[18px]">
-          <dl className="flex gap-[10px]">
-            <TimeTile label="Checked in" value={checkInAt} />
-            <TimeTile label="Checked out" value={checkOutAt} />
-          </dl>
-          {state === "checked-in" ? (
-            <PhoneOnlyNotice
-              description="Scan the code again when you leave. The app checks you are at the academy."
-              title="Check out with your phone"
-            />
-          ) : null}
-          {state === "checked-out" ? (
-            <p
-              className={cn(
-                "text-center text-[#BDBDBD] text-[13px] leading-4",
-                !tickedBy && "text-white/64"
-              )}
-            >
-              {tickedBy ?? "Your coach hasn’t ticked you in yet."}
-            </p>
-          ) : null}
-        </div>
-      )}
+      <SessionAction
+        checkInAt={checkInAt}
+        checkOutAt={checkOutAt}
+        closesAt={closesAt}
+        opensAt={opensAt}
+        state={state}
+        tickedBy={tickedBy}
+      />
     </section>
+  );
+}
+
+function QrIcon() {
+  return (
+    <svg aria-hidden="true" height="22" viewBox="0 0 18 18" width="22">
+      <rect
+        fill="none"
+        height="5.5"
+        rx="1"
+        stroke="#111111"
+        strokeWidth="1.8"
+        width="5.5"
+        x="2"
+        y="2"
+      />
+      <rect
+        fill="none"
+        height="5.5"
+        rx="1"
+        stroke="#111111"
+        strokeWidth="1.8"
+        width="5.5"
+        x="10.5"
+        y="2"
+      />
+      <rect
+        fill="none"
+        height="5.5"
+        rx="1"
+        stroke="#111111"
+        strokeWidth="1.8"
+        width="5.5"
+        x="2"
+        y="10.5"
+      />
+      <path
+        d="M10.5 10.5h2v2M16 10.5v5.5h-5.5"
+        fill="none"
+        stroke="#111111"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+/**
+ * "Today · offline" (BPJ-0): where the check-in (or check-out) control would be, a
+ * dead "Offline" pill. The page's "No connection" bar comes from the AppShell.
+ */
+function OfflineAction({ action }: { action: "Check-in" | "Check-out" }) {
+  return (
+    <div className="flex flex-col gap-[18px]">
+      <p
+        aria-disabled="true"
+        className="flex items-center justify-center gap-[10px] rounded-full bg-[#3A3A3A] p-5"
+      >
+        <QrIcon />
+        <span className="font-display text-[#9A9A9A] text-[26px] uppercase leading-none">
+          Offline
+        </span>
+      </p>
+      <p className="text-center text-[#BDBDBD] text-[13px] leading-4">
+        {action} needs a connection. Your coach can also check you in.
+      </p>
+    </div>
+  );
+}
+
+function SessionAction({
+  state,
+  opensAt,
+  closesAt,
+  checkInAt,
+  checkOutAt,
+  tickedBy,
+}: {
+  state: CardState;
+  opensAt: string | null;
+  closesAt: string | null;
+  checkInAt: string | null;
+  checkOutAt: string | null;
+  tickedBy: string | null;
+}) {
+  const offline = useIsOffline();
+  if (state === "upcoming") {
+    if (offline) {
+      return <OfflineAction action="Check-in" />;
+    }
+    return (
+      <div className="flex flex-col gap-[18px]">
+        <PhoneOnlyNotice
+          description={
+            opensAt
+              ? `Scan the code at the entrance from ${opensAt}. The app checks you are at the academy.`
+              : undefined
+          }
+        />
+        {closesAt ? (
+          <p className="text-center text-[#BDBDBD] text-[13px] leading-4 md:hidden">
+            Check-in is open until {closesAt}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-[18px]">
+      <dl className="flex gap-[10px]">
+        <TimeTile label="Checked in" value={checkInAt} />
+        <TimeTile label="Checked out" value={checkOutAt} />
+      </dl>
+      {state === "checked-in" && offline ? (
+        <OfflineAction action="Check-out" />
+      ) : null}
+      {state === "checked-in" && !offline ? (
+        <PhoneOnlyNotice
+          description="Scan the code again when you leave. The app checks you are at the academy."
+          title="Check out with your phone"
+        />
+      ) : null}
+      {state === "checked-out" ? (
+        <p
+          className={cn(
+            "text-center text-[#BDBDBD] text-[13px] leading-4",
+            !tickedBy && "text-white/64"
+          )}
+        >
+          {tickedBy ?? "Your coach hasn’t ticked you in yet."}
+        </p>
+      ) : null}
+    </div>
   );
 }

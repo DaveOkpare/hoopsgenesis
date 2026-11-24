@@ -1,4 +1,4 @@
-/* Query layer for the owner Users screen. Components import from here, never api.ts. */
+/* Query layer for the owner Users screens. Components import from here, never api.ts. */
 import {
   keepPreviousData,
   queryOptions,
@@ -8,6 +8,7 @@ import {
 
 import {
   banUser,
+  getPlatformUser,
   impersonateUser,
   listUserSessions,
   listUsers,
@@ -20,6 +21,7 @@ import { useViewer, viewerKeys } from "@/features/viewer/queries";
 import { isUiPreview } from "@/lib/preview";
 
 export type {
+  ListUsersResult,
   PlatformUser,
   PlatformUserMembership,
   UserSession,
@@ -27,17 +29,36 @@ export type {
 
 export const platformUserKeys = {
   all: ["platform", "users"] as const,
-  search: (searchValue: string) =>
-    [...platformUserKeys.all, "search", searchValue] as const,
+  page: (searchValue: string, page: number, perPage: number) =>
+    [...platformUserKeys.all, "search", searchValue, perPage, page] as const,
+  detail: (userId: Id) => [...platformUserKeys.all, "detail", userId] as const,
   sessions: (userId: Id) =>
     [...platformUserKeys.all, "sessions", userId] as const,
 };
 
-export function platformUsersQueryOptions(searchValue: string) {
+/** One page of people (page numbers from 1). */
+export function platformUsersQueryOptions(
+  searchValue: string,
+  page = 1,
+  perPage = 25
+) {
+  const needle = searchValue.trim();
   return queryOptions({
-    queryKey: platformUserKeys.search(searchValue.trim().toLowerCase()),
-    queryFn: () => listUsers({ searchValue }),
+    queryKey: platformUserKeys.page(needle.toLowerCase(), page, perPage),
+    queryFn: () =>
+      listUsers({
+        searchValue: needle,
+        offset: (page - 1) * perPage,
+        limit: perPage,
+      }),
     placeholderData: keepPreviousData,
+  });
+}
+
+export function platformUserQueryOptions(userId: Id) {
+  return queryOptions({
+    queryKey: platformUserKeys.detail(userId),
+    queryFn: () => getPlatformUser(userId),
   });
 }
 

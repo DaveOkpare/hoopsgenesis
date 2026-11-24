@@ -1,6 +1,7 @@
 /*
  * The student's own attendance (ST-4). Data-layer convention: see features/viewer/api.ts.
  */
+import { listEventOccurrences } from "@/features/student-calendar/api";
 import type {
   AttendanceStatus,
   DateOnly,
@@ -64,4 +65,30 @@ export async function listMyAttendance(
     a.sessionDate.localeCompare(b.sessionDate)
   );
   return { data, nextCursor: null };
+}
+
+/** A team session day, for the attendance calendar's links and upcoming dots. */
+export interface SessionDay {
+  cancelled: boolean;
+  eventId: Id;
+  sessionDate: DateOnly;
+}
+
+/**
+ * Every team session day in the range (GET /events, one row per session day, through
+ * the calendar feature's call, which also serves the preview fixtures). Academy-wide
+ * events are left out, as in 46Z-0 (team training and matches only).
+ */
+export async function listSessionDays(
+  academyId: Id,
+  range: AttendanceRange
+): Promise<SessionDay[]> {
+  const occurrences = await listEventOccurrences(academyId, range);
+  return occurrences
+    .filter(({ event }) => event.teamId !== null)
+    .map(({ event, sessionDate, cancelled }) => ({
+      eventId: event.id,
+      sessionDate,
+      cancelled,
+    }));
 }

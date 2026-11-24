@@ -1,7 +1,7 @@
 import { cn } from "@hoops-genesis/ui/lib/utils";
 import { type ChangeEvent, useCallback, useEffect, useState } from "react";
 
-import { UploadIcon } from "@/components/student/icons";
+import { PlusIcon, UploadIcon } from "@/components/student/icons";
 import {
   fileKindLabel,
   formatFileSize,
@@ -50,12 +50,15 @@ export function FilePicker({
   file,
   invalid,
   describedBy,
+  hint,
   onChange,
   onBlur,
 }: {
   id: string;
   file: File | null;
   invalid: boolean;
+  /** What the student types in instead of a file, for the empty state's hint. */
+  hint: keyof typeof OPTIONAL_HINT;
   describedBy?: string;
   onChange: (file: File | null) => void;
   onBlur: () => void;
@@ -125,25 +128,58 @@ export function FilePicker({
       ) : (
         <label
           className={cn(
-            "flex cursor-pointer flex-col items-center gap-2 rounded-md border-[1.5px] border-stone border-dashed px-5 py-7 text-center transition-colors hover:bg-fog peer-focus-visible:ring-2 peer-focus-visible:ring-ink",
+            "flex cursor-pointer items-center gap-3 rounded-md border-[#C8C8C8] border-[1.5px] border-dashed p-[14px] transition-colors hover:bg-fog peer-focus-visible:ring-2 peer-focus-visible:ring-ink",
             invalid && "border-orange-deep"
           )}
           htmlFor={id}
         >
-          <span className="flex size-11 items-center justify-center rounded-full bg-fog text-ink">
-            <UploadIcon height={18} width={18} />
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fog text-ink">
+            <PlusIcon height={18} width={18} />
           </span>
-          <span className="font-semibold text-[15px] text-ink leading-5">
-            <span className="md:hidden">Take a photo or choose a PDF</span>
-            <span className="max-md:hidden">
-              Choose a PDF or photo from your computer
+          <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
+            <span className="font-semibold text-[15px] text-ink leading-[18px]">
+              Add a photo or PDF (optional)
             </span>
-          </span>
-          <span className="text-[13px] text-muted leading-4">
-            PDF, JPEG or PNG · up to 10 MB
+            <span className="text-[13px] text-muted leading-4">
+              {OPTIONAL_HINT[hint]}
+            </span>
           </span>
         </label>
       )}
+    </div>
+  );
+}
+
+const OPTIONAL_HINT = {
+  numbers: "You can send the numbers without a file. Your coach checks them.",
+  details: "You can send the details without a file. Your coach checks them.",
+} as const;
+
+/**
+ * The file step when the server can't take files (503 `storage_not_configured`): no
+ * picker, and the record can still be sent with the values typed in (FDO-0).
+ */
+export function FileUnavailable({
+  hint,
+}: {
+  hint: keyof typeof OPTIONAL_HINT;
+}) {
+  return (
+    <div
+      className="flex items-center gap-3 rounded-md border-[#C8C8C8] border-[1.5px] border-dashed p-[14px]"
+      role="status"
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fog text-muted">
+        <UploadIcon height={18} width={18} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
+        <span className="font-semibold text-[15px] text-ink leading-[18px]">
+          Files can’t be added right now
+        </span>
+        <span className="text-[13px] text-muted leading-4">
+          {OPTIONAL_HINT[hint]} Keep the paper copy to show them.
+        </span>
+      </span>
     </div>
   );
 }

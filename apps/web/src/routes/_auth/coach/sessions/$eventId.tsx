@@ -1,47 +1,26 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import { parseAtParam, useSessionClock } from "@/features/sessions/clock";
+import { useSessionClock } from "@/features/sessions/clock";
 import {
   SessionScreen,
   type SessionSheet,
 } from "@/features/sessions/components/session-screen";
+import { validateSessionSearch } from "@/features/sessions/search";
 import { useActiveMembership, useViewer } from "@/features/viewer/queries";
 
-const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-interface SessionSearch {
-  /** Preview clock, "HH:mm" (dev preview only). */
-  at?: string;
-  /** Session day for multi-day events; defaults to the event's start date. */
-  date?: string;
-  /** Deep-linkable sheets: ?sheet=check-in&student=<id>, ?sheet=cancel. */
-  sheet?: SessionSheet;
-  student?: string;
-}
-
 export const Route = createFileRoute("/_auth/coach/sessions/$eventId")({
-  validateSearch: (search: Record<string, unknown>): SessionSearch => ({
-    at: parseAtParam(search.at),
-    date:
-      typeof search.date === "string" && PLAIN_DATE.test(search.date)
-        ? search.date
-        : undefined,
-    sheet:
-      search.sheet === "check-in" || search.sheet === "cancel"
-        ? search.sheet
-        : undefined,
-    student: typeof search.student === "string" ? search.student : undefined,
-  }),
+  validateSearch: validateSessionSearch,
   component: SessionPage,
 });
 
+/** A coach's session: 3O4-0, 5IC-0, HZE-0 on phones; 91C-0, HRK-0 on the web. */
 function SessionPage() {
   const { eventId } = Route.useParams();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const viewer = useViewer();
-  const academy = useActiveMembership()?.academy;
+  const membership = useActiveMembership();
   const now = useSessionClock();
 
   const openSheet = useCallback(
@@ -60,6 +39,14 @@ function SessionPage() {
       }),
     [navigate]
   );
+  const setQuery = useCallback(
+    (q: string) =>
+      navigate({
+        search: (prev) => ({ ...prev, q: q || undefined }),
+        replace: true,
+      }),
+    [navigate]
+  );
   const handleCancelled = useCallback(
     (scope: "day" | "series") => {
       if (scope === "series") {
@@ -71,18 +58,23 @@ function SessionPage() {
     [closeSheet, navigate, search.at]
   );
 
-  if (!academy) {
+  if (!membership) {
     return null;
   }
   return (
     <SessionScreen
-      academy={academy}
+      academy={membership.academy}
       date={search.date}
       eventId={eventId}
+      key={`${eventId}:${search.date ?? ""}`}
+      membership={membership}
       now={now}
       onCancelled={handleCancelled}
       onCloseSheet={closeSheet}
       onOpenSheet={openSheet}
+      onQuery={setQuery}
+      query={search.q ?? ""}
+      sessionRole="coach"
       sheet={search.sheet}
       studentId={search.student}
       viewerId={viewer.user.id}

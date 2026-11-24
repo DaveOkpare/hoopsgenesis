@@ -212,3 +212,8 @@ export const joinerFixtures = {
 
 /** Wrong codes in a row before code entry pauses (spec: "too many wrong guesses"). */
 export const WRONG_GUESS_LIMIT = 5;
+
+/** Checking this code answers 429 "too many tries" (9KQ-0 shows R4KV-7MXE-2HQZ). */
+export const RATE_LIMITED_CODE = "R4KV7MXE2HQZ";
+/** The wait that 429 names in preview ("Try again in 10 minutes"). */
+export const RATE_LIMITED_FOR_SECONDS = 600;

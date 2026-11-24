@@ -50,11 +50,11 @@ function inviteBreakdown(coaches: number, students: number): string {
 /** Builds the "Needs your attention" items from GET /dashboard. Empty ones drop out. */
 export function attentionItems(
   summary: DashboardSummary,
-  oldestDays: number | null,
+  _oldestDays: number | null,
   timeZone?: string
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
-  const { outstanding, records, unclosedSession, expiredInvites } = summary;
+  const { outstanding, unclosedSession, expiredInvites } = summary;
   if (outstanding.studentCount > 0) {
     const month = monthName(outstanding.periodStart, timeZone);
     const top = outstanding.topTeam
@@ -71,22 +71,8 @@ export function attentionItems(
       onPhone: false,
     });
   }
-  if (records.pendingCount > 0) {
-    const oldest =
-      records.oldest && oldestDays !== null
-        ? `Oldest: ${records.oldest.studentName}’s ${records.oldest.label}, ${plural(oldestDays, "day")} ago`
-        : "";
-    items.push({
-      kind: "records",
-      title: `${plural(records.pendingCount, "record")} waiting for review`,
-      phoneTitle: `${plural(records.pendingCount, "record")} to review`,
-      description: oldest,
-      action: "Review",
-      primary: false,
-      link: linkOptions({ to: "/admin/records" }),
-      onPhone: false,
-    });
-  }
+  // Records are read only for academy admins (coaches review them, IGD-0), so they no
+  // longer ask for the admin's attention here (YA-0, 5TY-0).
   if (unclosedSession) {
     const day = shortWeekdayDayMonth(unclosedSession.sessionDate, timeZone);
     const team = unclosedSession.teamName ?? "Academy";

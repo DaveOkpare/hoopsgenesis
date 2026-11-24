@@ -9,6 +9,7 @@ import {
 import {
   addTeamMember,
   getTeamDetail,
+  listTeamSessions,
   removeTeamMember,
   searchMembersForTeam,
 } from "@/features/team-detail/api";
@@ -19,6 +20,7 @@ export type {
   TeamCoach,
   TeamDetail,
   TeamFeeStatus,
+  TeamSession,
   TeamStudent,
 } from "@/features/team-detail/api";
 
@@ -49,6 +51,22 @@ export function teamDetailQueryOptions(
   return queryOptions({
     queryKey: teamDetailKeys.detail(academyId, teamId, today),
     queryFn: () => getTeamDetail(academyId, teamId, { today }),
+  });
+}
+
+export function teamSessionsQueryOptions(
+  academyId: Id,
+  teamId: Id,
+  today: DateOnly
+) {
+  return queryOptions({
+    queryKey: [
+      ...teamDetailKeys.all(academyId),
+      teamId,
+      "sessions",
+      today,
+    ] as const,
+    queryFn: () => listTeamSessions(academyId, { teamId, today }),
   });
 }
 

@@ -1,11 +1,16 @@
 import { Button } from "@hoops-genesis/ui/components/button";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import z from "zod";
 
-import { AuthTitle, authSubmitClass } from "@/components/auth/auth-parts";
+import {
+  AuthBackContent,
+  AuthTitle,
+  authBackClass,
+  authSubmitClass,
+} from "@/components/auth/auth-parts";
 import { AuthLayout } from "@/components/auth-layout";
 import { BrandMark } from "@/components/brand-mark";
 import SignUpForm from "@/components/sign-up-form";
@@ -113,7 +118,7 @@ function InviteLookup({ invitationId }: { invitationId: string }) {
     case "not-found":
       return (
         <AuthLayout>
-          <InviteNotice invitation={null} />
+          <InviteNotice invitation={null} signedIn={lookup.signedIn} />
         </AuthLayout>
       );
     default:
@@ -123,7 +128,7 @@ function InviteLookup({ invitationId }: { invitationId: string }) {
   if (invitation.status !== "pending") {
     return (
       <AuthLayout>
-        <InviteNotice invitation={invitation} />
+        <InviteNotice invitation={invitation} signedIn={lookup.signedIn} />
       </AuthLayout>
     );
   }
@@ -155,6 +160,9 @@ function CreateAccount({
       email={invitation?.email}
       header={
         <>
+          <Link className={authBackClass} search={{ invitationId }} to="/login">
+            <AuthBackContent label="Back to sign in" />
+          </Link>
           {invitation ? (
             <InviteBanner invitation={invitation} />
           ) : (
@@ -194,10 +202,11 @@ function GenericInviteBanner() {
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <p className="font-semibold text-[15px] text-ink leading-5">
-          You've been invited to Hoops Genesis
+          A Hoops Genesis invite link
         </p>
         <p className="text-[13px] text-ink-soft leading-[18px]">
-          Your academy's name and your team show once you're signed in.
+          Which academy it's for shows once you're signed in with the invited
+          email.
         </p>
       </div>
     </section>

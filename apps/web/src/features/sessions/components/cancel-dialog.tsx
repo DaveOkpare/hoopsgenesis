@@ -21,7 +21,6 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { BellIcon } from "@/components/coach/coach-icons";
 import {
   sessionErrorMessage,
   sessionLongLabel,
@@ -85,7 +84,8 @@ function ScopeOption({
 
 /**
  * "Cancel this session?" (CO-6, 5KW-0). Bottom sheet on phones, dialog on the web.
- * Not possible once anyone has checked in. Students on the team are notified.
+ * Not possible once anyone has checked in. Nothing notifies students (the server sends
+ * no notification), and the reason is kept only in the activity log.
  */
 export function CancelDialog({
   session,
@@ -111,7 +111,6 @@ export function CancelDialog({
 
   const hasCheckIns = session.roster.some((e) => e.attendance);
   const series = session.seriesDates;
-  const students = session.roster.length;
   const teamName = session.team?.name ?? "the team";
   const reasonText = reason === "Other" ? otherReason.trim() : reason;
 
@@ -200,7 +199,7 @@ export function CancelDialog({
           ) : null}
           <fieldset className="flex flex-col gap-[10px]">
             <legend className="mb-[10px] font-semibold text-ink text-sm leading-[18px]">
-              Reason <LabelHint>(students see this)</LabelHint>
+              Reason <LabelHint>(saved in the activity log)</LabelHint>
             </legend>
             <div className="flex flex-wrap gap-2">
               {REASONS.map((r) => (
@@ -218,7 +217,7 @@ export function CancelDialog({
             {reason === "Other" ? (
               <>
                 <label className="sr-only" htmlFor={otherId}>
-                  Reason students will see
+                  Reason
                 </label>
                 <Input
                   aria-invalid={showError ? true : undefined}
@@ -230,15 +229,15 @@ export function CancelDialog({
                 />
                 {showError ? (
                   <FieldMessage tone="error">
-                    Tell students why the session is off.
+                    Say why the session is off.
                   </FieldMessage>
                 ) : null}
               </>
             ) : null}
           </fieldset>
-          <p className="flex items-center gap-[10px] rounded-[14px] bg-fog px-[14px] py-3 text-ink-soft text-sm leading-[19px]">
-            <BellIcon className="shrink-0" />
-            {students} students on {teamName} get a notification now.
+          <p className="rounded-[14px] bg-fog px-[14px] py-3 text-ink-soft text-sm leading-[19px]">
+            Nobody is notified automatically. Tell {teamName} yourself if they
+            need to know.
           </p>
         </DialogBody>
         <DialogFooter>

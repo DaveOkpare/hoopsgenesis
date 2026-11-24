@@ -14,6 +14,7 @@ import { appNow } from "@/lib/preview";
 export type {
   AuditDateFilter,
   AuditLogItem,
+  AuditLogPage,
   AuditLogParams,
   AuditTypeFilter,
 } from "@/features/audit-log/api";

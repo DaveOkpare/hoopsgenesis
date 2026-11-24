@@ -77,7 +77,7 @@ export function AuthLayout({
           ))}
         </ul>
       </aside>
-      <main className="flex flex-1 items-center justify-center p-6 max-md:items-stretch max-md:px-5 max-md:pt-4 max-md:pb-[max(36px,env(safe-area-inset-bottom))]">
+      <main className="flex min-w-0 flex-1 items-center justify-center p-6 max-md:items-stretch max-md:px-5 max-md:pt-4 max-md:pb-[max(36px,env(safe-area-inset-bottom))] md:max-lg:p-8">
         <div
           className={cn(
             "flex max-w-full flex-col max-md:w-full",

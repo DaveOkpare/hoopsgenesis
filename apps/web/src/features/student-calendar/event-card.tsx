@@ -1,5 +1,6 @@
 import { CountryDot } from "@hoops-genesis/ui/components/chip";
 import { cn } from "@hoops-genesis/ui/lib/utils";
+import { Link } from "@tanstack/react-router";
 import type { MyAttendance } from "@/features/student-attendance/queries";
 import { dayOfMonth, weekdayShort } from "@/features/student-calendar/dates";
 import type { StudentEvent } from "@/features/student-calendar/queries";
@@ -119,7 +120,10 @@ export function EventCard({
     : agendaMeta(event);
   const title = eventTitle(event);
 
-  return (
+  // Opens the event's day (ST-8), or the student's own attendance once there is a row (ST-4).
+  const linkClass =
+    "block rounded-md outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2";
+  const card = (
     <article
       aria-label={`${formatLongDate(date, timeZone)}: ${title}${cancelled ? ", cancelled" : ""}`}
       className={cn("flex gap-[14px] rounded-md p-[14px]", styles.card)}
@@ -175,5 +179,24 @@ export function EventCard({
         )}
       </div>
     </article>
+  );
+  return attendance && !cancelled ? (
+    <Link
+      className={linkClass}
+      params={{ eventId: event.id }}
+      search={{ date }}
+      to="/student/sessions/$eventId"
+    >
+      {card}
+    </Link>
+  ) : (
+    <Link
+      className={linkClass}
+      params={{ eventId: event.id }}
+      search={{ date }}
+      to="/student/events/$eventId"
+    >
+      {card}
+    </Link>
   );
 }

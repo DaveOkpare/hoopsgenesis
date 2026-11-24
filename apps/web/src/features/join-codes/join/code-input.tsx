@@ -38,6 +38,7 @@ function countBefore(text: string, index: number): number {
  */
 export function CodeInput({
   "aria-describedby": describedBy,
+  disabled = false,
   id,
   invalid = false,
   onChange,
@@ -46,6 +47,8 @@ export function CodeInput({
   value,
 }: {
   "aria-describedby"?: string;
+  /** Code entry paused ("Too many tries", 9KQ-0): greyed, not editable. */
+  disabled?: boolean;
   id: string;
   invalid?: boolean;
   onChange: (normalized: string) => void;
@@ -122,10 +125,16 @@ export function CodeInput({
       className={cn(
         "flex items-center justify-center rounded-md border-2 border-ink bg-white px-4 py-[18px] transition-shadow focus-within:shadow-[0_0_0_4px_#1111111a] max-md:px-3",
         invalid &&
-          "border-orange-deep bg-[#FFFAF6] focus-within:shadow-[0_0_0_4px_#B8501A26]"
+          "border-orange-deep bg-[#FFFAF6] focus-within:shadow-[0_0_0_4px_#B8501A26]",
+        disabled && "border-line bg-fog"
       )}
     >
-      <div className="relative w-[calc(14ch+0.84em+2px)] font-mono font-semibold text-[28px] text-ink leading-[34px] tracking-[0.06em] max-md:text-xl max-md:leading-[30px]">
+      <div
+        className={cn(
+          "relative w-[calc(14ch+0.84em+2px)] font-mono font-semibold text-[28px] text-ink leading-[34px] tracking-[0.06em] max-md:text-xl max-md:leading-[30px]",
+          disabled && "text-[#9A9A9A]"
+        )}
+      >
         <span
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 whitespace-pre"
@@ -139,7 +148,8 @@ export function CodeInput({
           autoCapitalize="characters"
           autoComplete="off"
           autoCorrect="off"
-          className="relative block w-full bg-transparent p-0 text-transparent caret-ink outline-none selection:bg-orange-soft selection:text-transparent"
+          className="relative block w-full bg-transparent p-0 text-transparent caret-ink outline-none selection:bg-orange-soft selection:text-transparent disabled:cursor-not-allowed"
+          disabled={disabled}
           enterKeyHint="go"
           id={id}
           inputMode="text"

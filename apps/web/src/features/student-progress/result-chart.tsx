@@ -66,6 +66,14 @@ export function ResultChart({
         `${dayMonth(p.record.recordedOn)}: ${formatResult(p.result, progress.series)}${p.record.status === "pending" ? " (waiting for review)" : ""}${p === best ? " (best)" : ""}`
     )
     .join("; ");
+  // Months as labels ("Aug", as drawn) unless two results share a month ("6 Nov");
+  // with many results only every few get a label so they never collide.
+  const months = points.map((p) => p.record.recordedOn.slice(0, 7));
+  const byDay = new Set(months).size < months.length;
+  const axisLabel = (date: DateOnly) =>
+    byDay && date !== today ? dayMonth(date) : pointLabel(date, today);
+  const maxLabels = Math.max(2, Math.floor(width / (byDay ? 56 : 44)));
+  const labelEvery = Math.ceil(points.length / maxLabels);
 
   return (
     <figure className={className}>
@@ -131,9 +139,11 @@ export function ResultChart({
         aria-hidden="true"
         className="mt-[14px] flex justify-between text-[12px] text-muted leading-4"
       >
-        {points.map((p) => (
+        {points.map((p, i) => (
           <span key={p.record.id}>
-            {pointLabel(p.record.recordedOn, today)}
+            {i % labelEvery === 0 || i === points.length - 1
+              ? axisLabel(p.record.recordedOn)
+              : ""}
           </span>
         ))}
       </figcaption>

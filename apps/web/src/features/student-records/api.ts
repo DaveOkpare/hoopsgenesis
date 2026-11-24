@@ -18,7 +18,7 @@ import {
   academyPath,
   apiAll,
   apiData,
-  isApiError,
+  apiRaw,
 } from "@/lib/api-client";
 import { isUiPreview } from "@/lib/preview";
 
@@ -304,23 +304,23 @@ export interface UploadRecordInput {
   academyId: Id;
   /** The template's fields, `template` included. */
   data: Record<string, unknown>;
-  file: File;
+  /** Optional: a record can be sent with the values typed in and no file. */
+  file: File | null;
   recordedOn: DateOnly;
   schemaVersion: number;
   studentId: Id;
 }
 
 export interface UploadRecordResult {
-  /** False when the server has no file storage: the record was saved without it. */
-  fileSaved: boolean;
   record: StudentRecordView;
 }
 
 /**
- * Upload an academic record in one go: POST /uploads, PUT the file, then
- * POST /students/:studentId/records with the fileKey. When the server has no storage
- * (503 `storage_not_configured`) the record is still saved, without the file (records
- * without files are allowed), and `fileSaved` says so.
+ * Send an academic record: with a file, POST /uploads, PUT the file, then
+ * POST /students/:studentId/records with the fileKey; without one, only the last step.
+ * When the server has no storage (503 `storage_not_configured`) nothing is saved and
+ * the error is thrown, so the form can drop the file and offer to send without it
+ * ("Upload a record, no file", FDO-0) instead of quietly losing it.
  */
 export async function uploadRecord(
   input: UploadRecordInput
@@ -328,20 +328,15 @@ export async function uploadRecord(
   if (mock) {
     return (await mock()).uploadRecord(input);
   }
-  const contentType = uploadContentType(input.file) ?? input.file.type;
   let fileKey: string | undefined;
-  try {
+  if (input.file) {
     const upload = await createUpload(input.academyId, {
       fileName: input.file.name,
-      contentType,
+      contentType: uploadContentType(input.file) ?? input.file.type,
       size: input.file.size,
     });
     await putFile(upload, input.file);
     ({ fileKey } = upload);
-  } catch (error) {
-    if (!isApiError(error, "storage_not_configured")) {
-      throw error;
-    }
   }
   const record = await createRecord(input.academyId, input.studentId, {
     recordType: "academic",
@@ -350,5 +345,18 @@ export async function uploadRecord(
     data: input.data,
     ...(fileKey ? { fileKey } : {}),
   });
-  return { record, fileSaved: fileKey !== undefined };
+  return { record };
+}
+
+/**
+ * DELETE /api/v1/academies/:academyId/records/:id
+ * Only the recorder, only while the record is pending (409 `record_not_pending`).
+ */
+export async function deleteRecord(academyId: Id, recordId: Id): Promise<void> {
+  if (mock) {
+    return (await mock()).deleteRecord(academyId, recordId);
+  }
+  await apiRaw<null>(academyPath(academyId, `/records/${recordId}`), {
+    method: "DELETE",
+  });
 }

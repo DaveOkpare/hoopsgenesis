@@ -177,17 +177,12 @@ export const uploadSchemaFor = (
       note: z.string(),
     })
     .superRefine((values, ctx) => {
+      // The file is optional (FDO-0): the reviewer checks the typed values.
       if (values.file) {
         const problem = uploadProblem(values.file);
         if (problem) {
           ctx.addIssue({ code: "custom", path: ["file"], message: problem });
         }
-      } else {
-        ctx.addIssue({
-          code: "custom",
-          path: ["file"],
-          message: "Choose a PDF or photo to upload",
-        });
       }
       if (values.kind === "report_card") {
         checkReportCard(values, ctx, fieldsFor(values.kind));

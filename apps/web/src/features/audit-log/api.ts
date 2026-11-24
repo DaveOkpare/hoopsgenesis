@@ -30,6 +30,8 @@ const mock =
  */
 export interface AuditLogItem extends AuditLogEntry {
   actor: { id: Id; name: string } | null;
+  /** The phone's second line, e.g. "Cash · RWF 30,000 · November"; null = use summary. */
+  detail?: string | null;
   /** The platform owner, when the change was made while impersonating the actor. */
   impersonatedBy?: { id: Id; name: string } | null;
   /** The person the change was about, when there is one. */
@@ -38,14 +40,26 @@ export interface AuditLogItem extends AuditLogEntry {
   summary: string | null;
 }
 
+/** A page of the log: the newest rows that match, and whether older ones exist. */
+export interface AuditLogPage {
+  /** True when the server has more matching rows than were loaded. */
+  hasMore: boolean;
+  items: AuditLogItem[];
+}
+
 /** Filter groups shown in the "Type" menu; each maps to one or more `action` values. */
 export type AuditTypeFilter =
   | "all"
+  | "fees"
   | "void"
   | "check_out"
+  | "ticks"
   | "review"
   | "roster"
-  | "qr";
+  | "join_codes"
+  | "calendar"
+  | "qr"
+  | "admins";
 
 export type AuditDateFilter = "7d" | "30d" | "90d" | "all";
 
@@ -63,13 +77,32 @@ const DAYS_BY_FILTER: Record<Exclude<AuditDateFilter, "all">, number> = {
 };
 
 /** The server filters on one exact `action`; a group is one request per action. */
-const ACTIONS_BY_TYPE: Record<AuditTypeFilter, readonly (string | null)[]> = {
+export const ACTIONS_BY_TYPE: Record<
+  AuditTypeFilter,
+  readonly (string | null)[]
+> = {
   all: [null],
+  fees: ["fee.create", "fee.void"],
   void: ["fee.void", "attendance.void"],
   check_out: ["attendance.check_out"],
+  ticks: ["attendance.verify", "attendance.unverify"],
   review: ["record.verify", "record.reject"],
   roster: ["team.member_add", "team.member_remove", "member.join_by_code"],
+  join_codes: [
+    "invitation_code.create",
+    "invitation_code.revoke",
+    "member.join_by_code",
+  ],
+  calendar: ["event.delete", "event.session_cancel"],
   qr: ["academy_qr.regenerate"],
+  admins: [
+    "academy.admin_appoint",
+    "academy.admin_remove",
+    "academy.admin_invite",
+    "academy.admin_invite_cancel",
+    "academy.create",
+    "academy.delete",
+  ],
 };
 
 /** Shown next to the changed fields so a diff still says what it was about. */
@@ -170,6 +203,22 @@ function subjectIdOf(
   );
 }
 
+/** "U14 Training, 21 Nov" for event rows. */
+function eventSummary(
+  snapshot: Snapshot | null,
+  timeZone: string
+): string | null {
+  const title = str(snapshot?.title);
+  const date = str(snapshot?.sessionDate) ?? str(snapshot?.date);
+  const day = date
+    ? formatDayMonth(
+        `${date.slice(0, "YYYY-MM-DD".length)}T12:00:00Z`,
+        timeZone
+      )
+    : null;
+  return [title, day].filter(Boolean).join(", ") || null;
+}
+
 function summaryOf(
   row: ServerAuditRow,
   snapshot: Snapshot | null,
@@ -195,6 +244,9 @@ function summaryOf(
       ? formatDayMonth(date.slice(0, "YYYY-MM-DD".length), timeZone)
       : null;
   }
+  if (entity === "event") {
+    return eventSummary(snapshot, timeZone);
+  }
   if (entity === "record") {
     const data = asSnapshot(snapshot?.data);
     const template = str(data?.template);
@@ -208,6 +260,29 @@ function summaryOf(
   return null;
 }
 
+const METHOD_LABEL: Record<string, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank transfer",
+  mobile_money: "Mobile money",
+};
+
+/** Phone line for fee rows: "Cash · RWF 30,000 · November", "Ref MM-48B5968 · …". */
+function detailOf(
+  row: ServerAuditRow,
+  snapshot: Snapshot | null,
+  summary: string | null
+): string | null {
+  if (!(row.action.startsWith("fee.") && snapshot)) {
+    return null;
+  }
+  const reference = str(snapshot.paymentReference);
+  const method = str(snapshot.paymentMethod);
+  const how = reference
+    ? `Ref ${reference}`
+    : (method && (METHOD_LABEL[method] ?? method)) || null;
+  return [how, summary].filter(Boolean).join(" · ") || null;
+}
+
 function toItem(
   row: ServerAuditRow,
   directory: StudentDirectory,
@@ -217,6 +292,7 @@ function toItem(
   const after = asSnapshot(row.after);
   const subjectId = subjectIdOf(before, after);
   const subjectName = personName(directory, subjectId);
+  const summary = summaryOf(row, after ?? before, directory, timeZone);
   const shown = compact(
     withNames(before, directory),
     withNames(after, directory)
@@ -236,7 +312,8 @@ function toItem(
     createdAt: row.createdAt,
     subject:
       subjectId && subjectName ? { id: subjectId, name: subjectName } : null,
-    summary: summaryOf(row, after ?? before, directory, timeZone),
+    summary,
+    detail: detailOf(row, after ?? before, summary),
   };
 }
 
@@ -256,12 +333,12 @@ function fromDate(date: AuditDateFilter, timeZone: string): string | undefined {
 async function fetchRows(
   academyId: Id,
   query: Record<string, string | undefined>
-): Promise<ServerAuditRow[]> {
+): Promise<{ rows: ServerAuditRow[]; hasMore: boolean }> {
   const page = await apiPage<ServerAuditRow>(
     academyPath(academyId, "/audit-log"),
     { query: { limit: MAX_PAGE_SIZE, ...query } }
   );
-  return page.data;
+  return { rows: page.data, hasMore: Boolean(page.nextCursor) };
 }
 
 /**
@@ -271,7 +348,7 @@ async function fetchRows(
 export async function listAuditLog(
   academyId: Id,
   params: AuditLogParams
-): Promise<AuditLogItem[]> {
+): Promise<AuditLogPage> {
   if (mock) {
     return (await mock()).listAuditLog(academyId, params);
   }
@@ -288,11 +365,18 @@ export async function listAuditLog(
       })
     ),
   ]);
-  return pages
-    .flat()
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-    .slice(0, MAX_PAGE_SIZE)
-    .map((row) => toItem(row, directory, timeZone));
+  const seen = new Set<Id>();
+  const rows = pages
+    .flatMap((page) => page.rows)
+    // join_codes and roster share member.join_by_code; never list a row twice.
+    .filter((row) => !seen.has(row.id) && Boolean(seen.add(row.id)))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  return {
+    items: rows
+      .slice(0, MAX_PAGE_SIZE)
+      .map((row) => toItem(row, directory, timeZone)),
+    hasMore: rows.length > MAX_PAGE_SIZE || pages.some((page) => page.hasMore),
+  };
 }
 
 /** Everyone who appears as an actor in the last 90 days, for the "Person" filter. */
@@ -303,7 +387,7 @@ export async function listAuditActors(
     return (await mock()).listAuditActors(academyId);
   }
   const academy = await loadAcademy(academyId);
-  const rows = await fetchRows(academyId, {
+  const { rows } = await fetchRows(academyId, {
     from: fromDate("90d", academy?.timezone ?? "UTC"),
   });
   const seen = new Map<Id, string>();

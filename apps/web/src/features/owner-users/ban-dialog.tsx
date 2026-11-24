@@ -15,6 +15,7 @@ import { type AnyFieldApi, useForm } from "@tanstack/react-form";
 import { type ChangeEvent, type FormEvent, useCallback } from "react";
 import { toast } from "sonner";
 import z from "zod";
+import { useIsOffline } from "@/components/offline";
 
 import {
   type PlatformUser,
@@ -30,19 +31,16 @@ const schema = z.object({
   reason: z
     .string()
     .trim()
-    .min(MIN_REASON, "Write a short reason. It goes in the audit log."),
+    .min(MIN_REASON, "Write a short reason. It is kept on the account."),
 });
+
+/** Unbanning takes no reason: Better Auth has nowhere to keep one. */
+const unbanSchema = z.object({ reason: z.string() });
 
 const selectSubmitting = (state: { isSubmitting: boolean }) =>
   state.isSubmitting;
 
-function ReasonField({
-  field,
-  banning,
-}: {
-  field: AnyFieldApi;
-  banning: boolean;
-}) {
+function ReasonField({ field }: { field: AnyFieldApi }) {
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) =>
       field.handleChange(event.target.value),
@@ -59,11 +57,7 @@ function ReasonField({
         name={field.name}
         onBlur={field.handleBlur}
         onChange={handleChange}
-        placeholder={
-          banning
-            ? "e.g. Shared their account with another student"
-            : "e.g. Confirmed with the academy admin"
-        }
+        placeholder="e.g. Shared their account with another student"
         value={field.state.value as string}
       />
       {error?.message ? (
@@ -72,7 +66,8 @@ function ReasonField({
         </FieldMessage>
       ) : (
         <FieldMessage id="ban-reason-hint">
-          Saved to the platform audit log with your name.
+          Kept on the account as the ban reason and shown on their page. Bans
+          are not written to the audit log.
         </FieldMessage>
       )}
     </Field>
@@ -82,12 +77,13 @@ function ReasonField({
 function BanForm({ user, onDone }: { user: PlatformUser; onDone: () => void }) {
   const ban = useBanUser();
   const unban = useUnbanUser();
+  const offline = useIsOffline();
   const banning = !user.banned;
   const first = firstName(user.name);
 
   const form = useForm({
     defaultValues: { reason: "" },
-    validators: { onSubmit: schema },
+    validators: { onSubmit: banning ? schema : unbanSchema },
     onSubmit: async ({ value }) => {
       const reason = value.reason.trim();
       try {
@@ -97,7 +93,7 @@ function BanForm({ user, onDone }: { user: PlatformUser; onDone: () => void }) {
             description: "They were signed out on every device.",
           });
         } else {
-          await unban.mutateAsync({ userId: user.id, reason });
+          await unban.mutateAsync({ userId: user.id });
           toast.success(`${user.name} can sign in again`);
         }
         onDone();
@@ -126,17 +122,19 @@ function BanForm({ user, onDone }: { user: PlatformUser; onDone: () => void }) {
             : `${user.name} can sign in again with their usual email and password.`}
         </DialogDescription>
       </DialogHeader>
-      <DialogBody>
-        <form.Field name="reason">
-          {(field) => <ReasonField banning={banning} field={field} />}
-        </form.Field>
-      </DialogBody>
+      {banning ? (
+        <DialogBody>
+          <form.Field name="reason">
+            {(field) => <ReasonField field={field} />}
+          </form.Field>
+        </DialogBody>
+      ) : null}
       <DialogFooter>
         <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
         <form.Subscribe selector={selectSubmitting}>
           {(isSubmitting) => (
             <Button
-              disabled={isSubmitting}
+              disabled={isSubmitting || offline}
               type="submit"
               variant={banning ? "destructive" : "default"}
             >
@@ -149,7 +147,10 @@ function BanForm({ user, onDone }: { user: PlatformUser; onDone: () => void }) {
   );
 }
 
-/** Ban / unban with a reason (PA-2). Opened by `?dialog=ban` on /owner/users. */
+/**
+ * Ban with a reason, or unban (PA-2). Opened by `?dialog=ban` on /owner/users and
+ * /owner/users/$userId.
+ */
 export function BanDialog({
   user,
   open,

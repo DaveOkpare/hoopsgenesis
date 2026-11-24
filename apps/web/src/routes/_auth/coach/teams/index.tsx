@@ -1,20 +1,30 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { RouteStub } from "@/components/route-stub";
-import { useActiveMembership } from "@/features/viewer/queries";
+import { useSessionClock } from "@/features/sessions/clock";
+import { localDate } from "@/features/sessions/time";
+import { MyTeamsScreen } from "@/features/teams/my-teams-screen";
+import { useActiveMembership, useViewer } from "@/features/viewer/queries";
 
 export const Route = createFileRoute("/_auth/coach/teams/")({
-  component: MyteamsPage,
+  component: MyTeamsPage,
 });
 
-/** No design yet: names the coach's teams (from the session) above the stub. */
-function MyteamsPage() {
-  const teams = useActiveMembership()?.teams ?? [];
+/** My teams, story CO-10 (Paper 8RA-0 web, C6C-0 phone). */
+function MyTeamsPage() {
+  const viewer = useViewer();
+  const membership = useActiveMembership();
+  const now = useSessionClock();
+  if (!membership) {
+    return null;
+  }
+  const { academy } = membership;
   return (
-    <RouteStub
-      eyebrow={teams.map((team) => team.name).join(", ") || "No team yet"}
-      title="My teams"
-      web="4YX-0 Team page (pick a team)"
+    <MyTeamsScreen
+      academyId={academy.id}
+      academyName={academy.name}
+      timeZone={academy.timezone}
+      today={localDate(now, academy.timezone)}
+      viewerId={viewer.user.id}
     />
   );
 }

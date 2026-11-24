@@ -595,21 +595,44 @@ export async function unverifyAttendance(
 }
 
 /**
- * Check a student out by hand (the one allowed change to a row).
- * POST /attendance/:id/check-out (checkOutAt defaults to now on the server).
- * 409 `already_checked_out`, 422 `not_checked_in`.
+ * Change a recorded row (academy admins only: CO-5 "Change" after close-out). Rows are
+ * append-only, so this voids the row (POST /attendance/:id/void { reason }, admin only)
+ * and records the new status (POST /attendance with an Idempotency-Key). If the second
+ * call fails the student is left unmarked, which the screen shows and can fix.
  */
-export async function checkOutAttendance(
+export async function changeAttendance(
   academyId: Id,
-  input: { id: Id }
-): Promise<SessionAttendance> {
-  if (mock) {
-    return (await mock()).checkOutAttendance(academyId, input);
+  input: {
+    rowId: Id;
+    reason: string;
+    eventId: Id;
+    sessionDate: DateOnly;
+    entry: AttendanceEntryInput;
+    asOf: Timestamp;
+    idempotencyKey: string;
   }
-  return await apiData<SessionAttendance>(
-    academyPath(academyId, `/attendance/${input.id}/check-out`),
-    { method: "POST", body: {} }
-  );
+): Promise<SessionAttendance[]> {
+  if (mock) {
+    return (await mock()).changeAttendance(academyId, input);
+  }
+  try {
+    await apiData(academyPath(academyId, `/attendance/${input.rowId}/void`), {
+      method: "POST",
+      body: { reason: input.reason },
+    });
+  } catch (error) {
+    // A retry after the void went through: carry on and record.
+    if (!isApiError(error, "already_voided")) {
+      throw error;
+    }
+  }
+  return await recordAttendance(academyId, {
+    eventId: input.eventId,
+    sessionDate: input.sessionDate,
+    entries: [input.entry],
+    asOf: input.asOf,
+    idempotencyKey: input.idempotencyKey,
+  });
 }
 
 /**

@@ -7,6 +7,8 @@
  * 6G1-0) and the confirm screen's place and coaches (6WR-0). See their functions.
  */
 import type { Country, Id, Paginated, Timestamp } from "@/features/types";
+import { toAcademy } from "@/features/viewer/api";
+import { academyCountry } from "@/features/viewer/selectors";
 import {
   ApiError,
   academyPath,
@@ -353,6 +355,98 @@ export async function redeemInvitationCode(input: {
     })
   );
   return result;
+}
+
+/** "Joined with a code" (9HB-0 / 9JO-0): read as the new member, right after joining. */
+export interface JoinedDetails {
+  city: string;
+  country: Country;
+  nextSession: {
+    location: string | null;
+    /** YYYY-MM-DD in the academy's time zone. */
+    sessionDate: string;
+    /** "17:00", or null for an all-day event. */
+    startTime: string | null;
+  } | null;
+}
+
+interface SessionRow {
+  cancelled?: boolean;
+  location: string | null;
+  sessionDate: string;
+  startsAt: Timestamp | null;
+  startTime: string | null;
+}
+
+/** How far ahead "Next session" looks (the events list allows 92 days). */
+const NEXT_SESSION_DAYS = 30;
+
+function plainDate(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/**
+ * Place and next session for the joined screen. Once in, the person may read their
+ * academy and team: `organization.list()` (name and time zone, so city and country) and
+ * GET /academies/:id/events?teamId&from&to for the team's next session.
+ */
+export async function getJoinedDetails(input: {
+  academyId: Id;
+  teamId: Id | null;
+}): Promise<JoinedDetails> {
+  if (mock) {
+    return (await mock()).getJoinedDetails(input);
+  }
+  const orgs = unwrapAuth(await authClient.organization.list()) ?? [];
+  const org = orgs.find((row) => row.id === input.academyId);
+  if (!org) {
+    throw new ApiError({
+      status: 404,
+      code: "not_found",
+      message: "Couldn't find the academy you joined.",
+    });
+  }
+  const academy = toAcademy(org as unknown as Record<string, unknown>);
+  const country = academyCountry(academy);
+  if (!input.teamId) {
+    return { city: academy.shortName, country, nextSession: null };
+  }
+  const now = new Date();
+  const sessions = await apiAll<SessionRow>(
+    academyPath(input.academyId, "/events"),
+    {
+      query: {
+        teamId: input.teamId,
+        from: plainDate(now, academy.timezone),
+        to: plainDate(
+          new Date(now.getTime() + NEXT_SESSION_DAYS * DAY_MS),
+          academy.timezone
+        ),
+      },
+      maxItems: 50,
+    }
+  );
+  const next = sessions.find(
+    (row) =>
+      !row.cancelled &&
+      (row.startsAt === null || Date.parse(row.startsAt) > now.getTime())
+  );
+  return {
+    city: academy.shortName,
+    country,
+    nextSession: next
+      ? {
+          sessionDate: next.sessionDate,
+          startTime: next.startTime,
+          location: next.location,
+        }
+      : null,
+  };
 }
 
 /**

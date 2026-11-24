@@ -131,25 +131,28 @@ export function ResultList({
           who = `logged by ${personLabel(record.recordedByPerson)}`;
         }
         return (
-          <li
-            className="flex items-center justify-between gap-3 border-line border-b py-3 last:border-b-0"
-            key={record.id}
-          >
-            <div className="flex min-w-0 flex-col">
-              <p className="font-semibold text-[15px] text-ink leading-[18px]">
-                {formatResult(result, progress.series)}
-                {progress.best?.record.id === record.id ? (
-                  <span className="text-orange-deep">
-                    {" "}
-                    <span aria-hidden="true">★</span> Best
-                  </span>
-                ) : null}
-              </p>
-              <p className="text-[13px] text-muted leading-4">
-                {[when, who].filter(Boolean).join(" · ")}
-              </p>
-            </div>
-            <StatusPill status={record.status} />
+          <li className="border-line border-b last:border-b-0" key={record.id}>
+            <Link
+              className="flex items-center justify-between gap-3 py-3 outline-none hover:bg-fog/60 focus-visible:bg-fog"
+              params={{ recordId: record.id }}
+              to="/student/records/$recordId"
+            >
+              <div className="flex min-w-0 flex-col">
+                <p className="font-semibold text-[15px] text-ink leading-[18px]">
+                  {formatResult(result, progress.series)}
+                  {progress.best?.record.id === record.id ? (
+                    <span className="text-orange-deep">
+                      {" "}
+                      <span aria-hidden="true">★</span> Best
+                    </span>
+                  ) : null}
+                </p>
+                <p className="text-[13px] text-muted leading-4">
+                  {[when, who].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+              <StatusPill status={record.status} />
+            </Link>
           </li>
         );
       })}

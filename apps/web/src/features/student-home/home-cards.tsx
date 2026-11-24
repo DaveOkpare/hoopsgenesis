@@ -57,6 +57,9 @@ export function FeeDueCard({ due, today }: { due: FeeDue; today: DateOnly }) {
           </span>
         </p>
         <p className="text-ink-soft text-sm leading-5">
+          {due.estimated
+            ? "Estimate: the same as your last payment. The academy hasn’t billed this month. "
+            : null}
           Pay at the front desk in cash or by Mobile Money. The admin records it
           and it shows here.
         </p>
@@ -67,6 +70,38 @@ export function FeeDueCard({ due, today }: { due: FeeDue; today: DateOnly }) {
       >
         See payment history
       </Link>
+    </section>
+  );
+}
+
+/**
+ * Today for a student on no team yet ("Student, no team yet" in spec AGW-0): say who
+ * acts next; no button, since the student can't do anything about it.
+ */
+export function NoTeamCard({ academyName }: { academyName: string }) {
+  return (
+    <section
+      aria-labelledby="no-team-title"
+      className="flex items-center gap-4 rounded-[20px] bg-orange-soft p-5 md:min-w-0 md:flex-[1.2] md:basis-0 md:p-7"
+    >
+      <span
+        aria-hidden="true"
+        className="flex size-[52px] shrink-0 items-center justify-center rounded-full border-2 border-orange-deep border-dashed font-display text-[22px] text-orange-deep leading-6"
+      >
+        ?
+      </span>
+      <div className="flex flex-col gap-[6px]">
+        <h2
+          className="font-semibold text-base text-ink leading-[22px]"
+          id="no-team-title"
+        >
+          You’re not on a team yet
+        </h2>
+        <p className="text-ink-soft text-sm leading-5">
+          You’re in {academyName}. Your academy admin will put you on a team.
+          Your sessions and check-in show up here once that’s done.
+        </p>
+      </div>
     </section>
   );
 }
@@ -157,7 +192,9 @@ export function AttendanceTile({
           {summary.rate === null ? "—" : `${summary.rate}%`}
         </span>
         <span className="text-muted text-sm leading-[18px]">
-          {summary.attended} of {summary.counted} sessions
+          {summary.counted === 0
+            ? "No sessions yet this month"
+            : `${summary.attended} of ${summary.counted} sessions`}
         </span>
       </span>
       <span aria-hidden="true" className="flex flex-wrap gap-[6px]">
@@ -199,6 +236,8 @@ export function ResultTile({
     note = `${formatResult(pending.result, progress.series)} ${when} is waiting for ${who} to verify.`;
   } else if (progress.best) {
     note = `Best set on ${dayMonth(progress.best.record.recordedOn)}.`;
+  } else if (progress.points.length === 0) {
+    note = "No results yet. Your coach logs them at training.";
   }
   return (
     <Link className={cn(tileClass, "bg-fog", cardLink)} to="/student/progress">
@@ -209,7 +248,7 @@ export function ResultTile({
         <span className="font-display text-display-sm text-ink leading-[56px]">
           {progress.best ? formatValue(progress.best.result.value) : "—"}
         </span>
-        {progress.suffix ? (
+        {progress.suffix && progress.best ? (
           <span className="text-base text-muted leading-5">
             {progress.suffix}
           </span>
@@ -234,7 +273,7 @@ export function UploadTile() {
   return (
     <section
       aria-labelledby="add-report-card"
-      className="flex min-w-0 flex-1 basis-0 flex-col justify-between gap-[18px] rounded-lg border border-line p-6"
+      className="flex min-w-0 flex-1 basis-0 flex-col justify-between gap-[18px] rounded-lg border border-line p-6 md:max-lg:col-span-2 md:max-lg:flex-row md:max-lg:items-center"
     >
       <div className="flex flex-col gap-2">
         <h2

@@ -126,3 +126,23 @@ export function CloseIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+/** Clock in the "Too many tries" box (9KQ-0). */
+export function PausedClockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      height="20"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeWidth="1.6"
+      viewBox="0 0 20 20"
+      width="20"
+    >
+      <circle cx="10" cy="10" r="7.5" />
+      <path d="M10 6v4.2l2.6 1.6" />
+    </svg>
+  );
+}

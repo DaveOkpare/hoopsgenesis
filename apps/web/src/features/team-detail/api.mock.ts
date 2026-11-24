@@ -4,10 +4,12 @@
  */
 import { fixtureDelay, teams } from "@/features/fixtures";
 import { formatResult } from "@/features/results/templates";
+import { calendarEvents } from "@/features/sessions/fixtures";
 import type {
   MemberCandidate,
   TeamDetail,
   TeamFeeStatus,
+  TeamSession,
 } from "@/features/team-detail/api";
 import {
   academyMembers,
@@ -17,6 +19,7 @@ import {
   rosterOrder,
   teamSport,
 } from "@/features/team-detail/fixtures";
+import { teamAttendancePercent } from "@/features/teams/fixtures";
 import { createdTeamSports, createdTeams } from "@/features/teams/store";
 import type { DateOnly, Id, Member, Team } from "@/features/types";
 
@@ -88,6 +91,7 @@ export async function getTeamDetail(
   return {
     team,
     sport: teamSport[teamId] ?? createdTeamSports[teamId] ?? null,
+    attendancePercent: teamAttendancePercent[teamId] ?? null,
     students: onTeam
       .filter((m) => m.roles.includes("student"))
       .map((m) => {
@@ -185,4 +189,27 @@ export async function removeTeamMember(
   await fixtureDelay();
   const member = memberOf(academyId, input.userId);
   member.teamIds = member.teamIds.filter((id) => id !== input.teamId);
+}
+
+/** The team's fixture sessions from today on (single-date events). */
+export async function listTeamSessions(
+  _academyId: Id,
+  params: { teamId: Id; today: DateOnly }
+): Promise<TeamSession[]> {
+  await fixtureDelay();
+  return calendarEvents
+    .filter((e) => e.teamId === params.teamId && e.startDate >= params.today)
+    .map((e) => ({
+      eventId: e.id,
+      sessionDate: e.startDate,
+      startTime: e.startTime,
+      title: e.title,
+      location: e.location,
+      cancelled: e.excludedDates.includes(e.startDate),
+    }))
+    .sort((a, b) =>
+      `${a.sessionDate} ${a.startTime ?? ""}`.localeCompare(
+        `${b.sessionDate} ${b.startTime ?? ""}`
+      )
+    );
 }

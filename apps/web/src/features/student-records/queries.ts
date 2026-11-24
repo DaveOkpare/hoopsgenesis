@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  deleteRecord,
   getRecord,
   type ListRecordsParams,
   listRecordTemplates,
@@ -66,6 +67,23 @@ export function recordQueryOptions(academyId: Id, recordId: Id) {
     queryKey: studentRecordKeys.detail(academyId, recordId),
     queryFn: () => getRecord(academyId, recordId),
     retry: false,
+  });
+}
+
+/** Delete a pending record the student sent; it leaves every list. */
+export function useDeleteRecord() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ academyId, recordId }: { academyId: Id; recordId: Id }) =>
+      deleteRecord(academyId, recordId),
+    onSuccess: async (_data, { academyId, recordId }) => {
+      queryClient.removeQueries({
+        queryKey: studentRecordKeys.detail(academyId, recordId),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: studentRecordKeys.all(academyId),
+      });
+    },
   });
 }
 

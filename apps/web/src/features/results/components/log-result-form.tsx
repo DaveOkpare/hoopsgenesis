@@ -25,6 +25,7 @@ import {
 import { toast } from "sonner";
 import z from "zod";
 import { ErrorState } from "@/components/error-state";
+import { useIsOffline } from "@/components/offline";
 import { PickerValue } from "@/features/events/components/picker-row";
 import {
   bestNote,
@@ -40,7 +41,12 @@ import {
   sessionOptionsQueryOptions,
   useCreateAthleticRecord,
 } from "@/features/results/queries";
-import type { DrillId, ResultTemplate } from "@/features/results/templates";
+import {
+  type DrillId,
+  type ExtraField,
+  extraDefaults,
+  type ResultTemplate,
+} from "@/features/results/templates";
 import { formatWeekdayDayMonth } from "@/features/sessions/time";
 import type { DateOnly, Id, Team } from "@/features/types";
 import { firstName, initials } from "@/lib/format";
@@ -164,7 +170,9 @@ function StudentCard({
           {student ? student.name : "Choose a student"}
         </p>
         <p className="text-[13px] text-muted leading-4">
-          {student ? student.teamName : "From your teams"}
+          {student
+            ? [student.teamName, student.sport].filter(Boolean).join(" · ")
+            : "From your teams"}
         </p>
       </div>
       <Button onClick={onChange} variant="link">
@@ -196,7 +204,15 @@ export function LogResultForm({
   onDrillChange: (drill: DrillId) => void;
   onSaved: () => void;
 }) {
-  const templates = useQuery(resultTemplatesQueryOptions(academyId));
+  const students = useQuery(coachStudentsQueryOptions(academyId, teams));
+  const student = students.data?.find((s) => s.id === studentId);
+  // The chips follow the student's team: in real mode every team gets the server's
+  // templates; the preview draws football drills for Girls U16 (IEF-0).
+  const templates = useQuery({
+    ...resultTemplatesQueryOptions(academyId, student?.teamId ?? null),
+    // Wait for the picked student's team before choosing the chips.
+    enabled: !studentId || students.data !== undefined,
+  });
   const template =
     templates.data?.find((t) => t.id === drill) ?? templates.data?.[0];
   if (!template) {
@@ -214,8 +230,8 @@ export function LogResultForm({
       onDrillChange={onDrillChange}
       onSaved={onSaved}
       onStudentChange={onStudentChange}
-      studentId={studentId}
-      teams={teams}
+      student={student}
+      students={students.data}
       template={template}
       templates={templates.data ?? []}
       today={today}
@@ -225,9 +241,9 @@ export function LogResultForm({
 
 function LogResultFields({
   academyId,
-  teams,
   today,
-  studentId,
+  student,
+  students,
   template,
   templates,
   onStudentChange,
@@ -235,18 +251,20 @@ function LogResultFields({
   onSaved,
 }: {
   academyId: Id;
-  teams: Pick<Team, "id" | "name">[];
   today: DateOnly;
-  studentId?: Id;
+  student: CoachStudent | undefined;
+  /** undefined while loading. */
+  students: CoachStudent[] | undefined;
   template: ResultTemplate;
   templates: ResultTemplate[];
   onStudentChange: (studentId: Id) => void;
   onDrillChange: (drill: DrillId) => void;
   onSaved: () => void;
 }) {
-  const students = useQuery(coachStudentsQueryOptions(academyId, teams));
-  const student = students.data?.find((s) => s.id === studentId);
+  const studentId = student?.id;
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Saving needs the server: the button waits while the phone is offline.
+  const offline = useIsOffline();
   const create = useCreateAthleticRecord(academyId);
   const { mutateAsync } = create;
 
@@ -264,6 +282,8 @@ function LogResultFields({
       date: today,
       /** null until the coach picks one: then the day's first session is used. */
       session: null as string | null,
+      /** The template's other fields (raw text; see templates.ts). */
+      extras: extraDefaults(template),
     },
     onSubmit: async ({ value }) => {
       if (!student || value.score === null) {
@@ -276,6 +296,7 @@ function LogResultFields({
           recordedOn: value.date,
           template,
           score: value.score,
+          extras: value.extras,
           eventId: session === NO_SESSION ? undefined : session,
         });
         toast.success(`Result saved for ${student.name}`);
@@ -309,7 +330,12 @@ function LogResultFields({
       ? picked
       : (sessions.data?.[0]?.eventId ?? NO_SESSION);
 
-  const note = bestNote(recent.data ?? [], template, score);
+  const note = bestNote(
+    recent.data ?? [],
+    template,
+    score,
+    student?.pronoun ?? "they"
+  );
 
   const openPicker = useCallback(() => setPickerOpen(true), []);
   const handlePick = useCallback(
@@ -322,15 +348,15 @@ function LogResultFields({
   const handleDrill = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
       const next = event.currentTarget.dataset.drill as DrillId;
-      form.setFieldValue("score", null);
-      form.setFieldMeta("score", (meta) => ({
-        ...meta,
-        errors: [],
-        errorMap: {},
-      }));
+      const nextTemplate = templates.find((t) => t.id === next);
+      form.reset({
+        ...form.state.values,
+        score: null,
+        extras: nextTemplate ? extraDefaults(nextTemplate) : {},
+      });
       onDrillChange(next);
     },
-    [form, onDrillChange]
+    [form, onDrillChange, templates]
   );
   const handleSubmit = useCallback(
     (event: FormEvent) => {
@@ -372,7 +398,7 @@ function LogResultFields({
         noValidate
         onSubmit={handleSubmit}
       >
-        {students.data ? (
+        {students ? (
           <StudentCard onChange={openPicker} student={student} />
         ) : (
           <Skeleton className="h-[68px] rounded-md" />
@@ -433,13 +459,23 @@ function LogResultFields({
           </FieldMessage>
         ) : null}
 
+        {template.extras.map((extra) => (
+          <form.Field
+            key={`${template.id}-${extra.name}`}
+            name={`extras.${extra.name}`}
+            validators={{ onSubmit: extraSchema(extra) }}
+          >
+            {(field) => <ExtraInput extra={extra} field={field} />}
+          </form.Field>
+        ))}
+
         <div className="md:hidden">{chart}</div>
 
         <form.Subscribe selector={selectSubmit}>
           {(isSubmitting) => (
             <Button
               className="w-full p-4 text-base leading-5"
-              disabled={isSubmitting}
+              disabled={isSubmitting || offline}
               type="submit"
             >
               Save result
@@ -455,7 +491,7 @@ function LogResultFields({
         onPick={handlePick}
         open={pickerOpen}
         selectedId={studentId}
-        students={students.data ?? []}
+        students={students ?? []}
       />
     </div>
   );
@@ -529,6 +565,166 @@ function SessionField({
           ))}
         </SelectContent>
       </Select>
+    </div>
+  );
+}
+
+const optionLabel = (value: string): string =>
+  value.charAt(0).toUpperCase() + value.slice(1).replaceAll("_", " ");
+
+function numberIssue(extra: ExtraField, value: string): string | null {
+  const number = Number(value);
+  if (Number.isNaN(number)) {
+    return "Enter a number";
+  }
+  if (extra.integer && !Number.isInteger(number)) {
+    return "Whole numbers only";
+  }
+  if (extra.min !== null && number < extra.min) {
+    return `At least ${extra.min}`;
+  }
+  if (extra.max !== null && number > extra.max) {
+    return `At most ${extra.max}`;
+  }
+  return null;
+}
+
+/** Validation for one of the template's other fields (raw text from the input). */
+function extraSchema(extra: ExtraField) {
+  const name = extra.label.toLowerCase();
+  return z.string().superRefine((raw, ctx) => {
+    const value = raw.trim();
+    let message: string | null = null;
+    if (value === "") {
+      if (extra.required) {
+        message =
+          extra.kind === "choice" ? `Choose the ${name}` : `Enter the ${name}`;
+      }
+    } else if (extra.kind === "number") {
+      message = numberIssue(extra, value);
+    } else if (
+      extra.kind === "text" &&
+      extra.maxLength !== null &&
+      value.length > extra.maxLength
+    ) {
+      message = `At most ${extra.maxLength} characters`;
+    }
+    if (message) {
+      ctx.addIssue({ code: "custom", message });
+    }
+  });
+}
+
+function ExtraLabel({
+  extra,
+  htmlFor,
+}: {
+  extra: ExtraField;
+  htmlFor?: string;
+}) {
+  const optional = extra.required ? null : (
+    <span className="font-normal text-muted"> (optional)</span>
+  );
+  const className = "font-semibold text-ink text-sm leading-[18px]";
+  return htmlFor ? (
+    <label className={className} htmlFor={htmlFor}>
+      {extra.label}
+      {optional}
+    </label>
+  ) : (
+    <span className={className}>
+      {extra.label}
+      {optional}
+    </span>
+  );
+}
+
+/**
+ * A template field besides the score, in the form's visual language: a choice is a
+ * row of chips (like Template), a number or text a fog box (like Date).
+ */
+function ExtraInput({
+  extra,
+  field,
+}: {
+  extra: ExtraField;
+  field: AnyFieldApi;
+}) {
+  const id = useId();
+  const value = (field.state.value as string | undefined) ?? "";
+  const error = (field.state.meta.errors[0] as { message?: string } | undefined)
+    ?.message;
+  const handleChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) =>
+      field.handleChange(event.target.value),
+    [field]
+  );
+  const handleChoice = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      const next = event.currentTarget.dataset.value ?? "";
+      // An optional choice can be cleared by tapping it again.
+      field.handleChange(!extra.required && next === value ? "" : next);
+    },
+    [extra.required, field, value]
+  );
+  const describedBy = extra.description ? `${id}-hint` : undefined;
+  const hint = extra.description ? (
+    <p className="text-[13px] text-muted leading-4" id={`${id}-hint`}>
+      {extra.description}
+    </p>
+  ) : null;
+  const message = error ? (
+    <FieldMessage className="text-sm leading-[18px]" tone="error">
+      {error}
+    </FieldMessage>
+  ) : null;
+  if (extra.kind === "choice") {
+    return (
+      <fieldset
+        aria-describedby={describedBy}
+        className="flex flex-col gap-[6px]"
+      >
+        <legend className="pb-[6px]">
+          <ExtraLabel extra={extra} />
+        </legend>
+        <div className="flex flex-wrap gap-[6px]">
+          {extra.options.map((option) => (
+            <FilterChip
+              className="px-[14px]"
+              data-value={option}
+              key={option}
+              onClick={handleChoice}
+              selected={option === value}
+            >
+              {optionLabel(option)}
+            </FilterChip>
+          ))}
+        </div>
+        {hint}
+        {message}
+      </fieldset>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-[6px]">
+      <ExtraLabel extra={extra} htmlFor={id} />
+      <input
+        aria-describedby={describedBy}
+        aria-invalid={error ? true : undefined}
+        className={cn(
+          "w-full rounded-[14px] border-2 bg-fog px-[14px] py-[11px] text-[15px] text-ink leading-[18px] outline-none transition-colors placeholder:text-muted focus:border-ink",
+          error ? "border-orange-deep" : "border-transparent"
+        )}
+        id={id}
+        inputMode={extra.kind === "number" ? "decimal" : undefined}
+        maxLength={extra.maxLength ?? undefined}
+        onBlur={field.handleBlur}
+        onChange={handleChange}
+        type="text"
+        value={value}
+      />
+      {hint}
+      {message}
     </div>
   );
 }

@@ -191,13 +191,23 @@ export async function createRecord(
 export async function uploadRecord(
   input: UploadRecordInput
 ): Promise<UploadRecordResult> {
-  const contentType = uploadContentType(input.file) ?? input.file.type;
+  const { file } = input;
+  if (!file) {
+    const record = await createRecord(input.academyId, input.studentId, {
+      recordType: "academic",
+      recordedOn: input.recordedOn,
+      schemaVersion: input.schemaVersion,
+      data: input.data,
+    });
+    return { record };
+  }
+  const contentType = uploadContentType(file) ?? file.type;
   const { fileKey, uploadUrl } = await createUpload(input.academyId, {
-    fileName: input.file.name,
+    fileName: file.name,
     contentType,
-    size: input.file.size,
+    size: file.size,
   });
-  await putFile(uploadUrl, input.file);
+  await putFile(uploadUrl, file);
   const record = await createRecord(input.academyId, input.studentId, {
     recordType: "academic",
     recordedOn: input.recordedOn,
@@ -205,12 +215,36 @@ export async function uploadRecord(
     fileKey,
     data: {
       ...input.data,
-      fileName: input.file.name,
-      fileSize: input.file.size,
+      fileName: file.name,
+      fileSize: file.size,
       contentType,
     },
   });
-  return { record, fileSaved: true };
+  return { record };
+}
+
+/** DELETE /api/v1/academies/:academyId/records/:id (own, pending only). */
+export async function deleteRecord(academyId: Id, recordId: Id): Promise<void> {
+  await fixtureDelay();
+  const index = store.findIndex(
+    (r) => r.id === recordId && r.academyId === academyId
+  );
+  const found = store[index];
+  if (!found) {
+    throw new ApiError({
+      status: 404,
+      code: "not_found",
+      message: "Record not found",
+    });
+  }
+  if (found.status !== "pending") {
+    throw new ApiError({
+      status: 409,
+      code: "record_not_pending",
+      message: "Only a record waiting for review can be deleted",
+    });
+  }
+  store.splice(index, 1);
 }
 
 /** Pseudo templates for the fixture records (drills and academic kinds). */

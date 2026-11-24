@@ -78,8 +78,11 @@ export function WrongAccountNotice({
  */
 export function InviteNotice({
   invitation,
+  signedIn,
 }: {
   invitation: InvitationDetails | null;
+  /** Signed in already: "I already have an account" would make no sense. */
+  signedIn: boolean;
 }) {
   return (
     <div className="flex flex-col gap-10 max-md:flex-1 max-md:justify-between max-md:pt-12">
@@ -89,17 +92,31 @@ export function InviteNotice({
         </AuthIconDisc>
         <NoticeBody invitation={invitation} />
       </div>
-      <div className="flex flex-col gap-3">
-        <Link
-          className={cn(buttonVariants({ size: "xl" }), authSubmitClass)}
-          to="/login"
-        >
-          I already have an account
-        </Link>
-        <p className="text-center text-muted text-sm leading-[18px]">
-          Signing in shows any invites that are still open.
-        </p>
-      </div>
+      {signedIn ? (
+        <div className="flex flex-col gap-3">
+          <Link
+            className={cn(buttonVariants({ size: "xl" }), authSubmitClass)}
+            to="/app"
+          >
+            Continue to the app
+          </Link>
+          <p className="text-center text-muted text-sm leading-[18px]">
+            Got a join code instead? You can enter it there.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <Link
+            className={cn(buttonVariants({ size: "xl" }), authSubmitClass)}
+            to="/login"
+          >
+            I already have an account
+          </Link>
+          <p className="text-center text-muted text-sm leading-[18px]">
+            Sign in to open the academies you already belong to.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

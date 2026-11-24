@@ -14,6 +14,7 @@ import {
   type MyFee,
 } from "@/features/student-fees/queries";
 import {
+  capitalize,
   coversLabel,
   dueMonthName,
   dueStatus,
@@ -149,14 +150,20 @@ export function NoFeeRecordCard() {
   );
 }
 
-/** "Paid 1 Oct · cash" */
-export function paidLine(fee: MyFee, timeZone: string, method = true): string {
+/** "Paid 1 Oct · cash" (list, 48R-0), or "Paid 6 Oct · Mobile money" (FK2-0). */
+export function paidLine(
+  fee: MyFee,
+  timeZone: string,
+  methodCase: "lower" | "sentence" = "lower"
+): string {
   const paid = fee.paidAt
     ? `Paid ${dayMonth(toDateOnly(fee.paidAt, timeZone))}`
     : "Paid";
-  return method && fee.paymentMethod
-    ? `${paid} · ${paymentMethodLabel(fee.paymentMethod)}`
-    : paid;
+  if (!fee.paymentMethod) {
+    return paid;
+  }
+  const method = paymentMethodLabel(fee.paymentMethod);
+  return `${paid} · ${methodCase === "sentence" ? capitalize(method) : method}`;
 }
 
 export function PaymentHistory({

@@ -3,14 +3,14 @@
  */
 
 /**
- * Head counts from the Members design (1I2-0): "48 people · 4 teams",
- * "All 48 · Students 40 · Coaches 6 · Admins 1 · Invites 5". The shared fixtures hold a
+ * Head counts from the Members design (1I2-0): "71 people · 4 teams",
+ * "All 71 · Students 64 · Coaches 6 · Admins 1 · Invites 5". The shared fixtures hold a
  * slice of these people (the rows the designs show), so totals come from here, the way
  * the server would return a total alongside a page of rows.
  */
 export const memberTotals = {
-  people: 48,
-  students: 40,
+  people: 71,
+  students: 64,
   coaches: 6,
   admins: 1,
   invites: 5,

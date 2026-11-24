@@ -6,6 +6,7 @@ import {
   type AthleticData,
   buildResultData,
   chipsFromServer,
+  type ExtraValues,
   type ResultTemplate,
   type ServerRecordTemplate,
 } from "@/features/results/templates";
@@ -19,6 +20,10 @@ const mock =
 export interface CoachStudent {
   id: Id;
   name: string;
+  /** Not stored by the server; real mode says "their" ("Same as their best"). */
+  pronoun: "she" | "he" | "they";
+  /** The team's sport; not stored by the server, so null in real mode. */
+  sport: string | null;
   teamId: Id;
   teamName: string;
 }
@@ -60,11 +65,14 @@ interface ServerOccurrence {
  * GET /record-templates?recordType=athletic&latest=true.
  */
 export async function listResultTemplates(
-  academyId: Id
+  academyId: Id,
+  params: { teamId: Id | null }
 ): Promise<ResultTemplate[]> {
   if (mock) {
-    return (await mock()).listResultTemplates(academyId);
+    return (await mock()).listResultTemplates(academyId, params);
   }
+  // The server's templates are the same for every team (it stores no sport), so the
+  // student's team does not narrow them in real mode.
   const templates = await apiData<ServerRecordTemplate[]>(
     academyPath(academyId, "/record-templates"),
     { query: { recordType: "athletic", latest: true } }
@@ -97,6 +105,8 @@ export async function listCoachStudents(
         students.push({
           id: m.userId,
           name: m.name,
+          pronoun: "they",
+          sport: null,
           teamId: team.id,
           teamName: team.name,
         });
@@ -154,7 +164,13 @@ export async function listSessionOptions(
   );
   return events
     .filter((e) => e.teamId === params.teamId && !e.cancelled)
-    .map((e) => ({ eventId: e.id, label: `${params.teamName} ${e.title}` }));
+    .map((e) => ({
+      eventId: e.id,
+      // "U14 Training"; a title that already names the team ("U14 training") stays.
+      label: e.title.toLowerCase().startsWith(params.teamName.toLowerCase())
+        ? e.title
+        : `${params.teamName} ${e.title}`,
+    }));
 }
 
 /**
@@ -170,6 +186,7 @@ export async function createAthleticRecord(
     recordedOn: DateOnly;
     template: ResultTemplate;
     score: number;
+    extras?: ExtraValues;
     eventId?: Id;
   }
 ): Promise<StudentRecord> {
@@ -184,7 +201,7 @@ export async function createAthleticRecord(
         recordType: "athletic",
         recordedOn: input.recordedOn,
         schemaVersion: input.template.schemaVersion,
-        data: buildResultData(input.template, input.score),
+        data: buildResultData(input.template, input.score, input.extras),
       },
     }
   );

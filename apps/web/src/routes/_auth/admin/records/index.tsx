@@ -2,13 +2,13 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import {
-  parseReviewSearch,
-  ReviewQueueScreen,
-  type ReviewSearch,
-} from "@/features/records/review-queue";
+  AdminRecordsScreen,
+  type AdminRecordsSearch,
+  parseAdminRecordsSearch,
+} from "@/features/records/admin-records";
 
-export const Route = createFileRoute("/_auth/admin/records")({
-  validateSearch: parseReviewSearch,
+export const Route = createFileRoute("/_auth/admin/records/")({
+  validateSearch: parseAdminRecordsSearch,
   component: RecordsPage,
 });
 
@@ -16,7 +16,7 @@ function RecordsPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const handleSearchChange = useCallback(
-    (patch: Partial<ReviewSearch>) => {
+    (patch: Partial<AdminRecordsSearch>) => {
       navigate({
         search: (previous) => ({ ...previous, ...patch }),
         replace: true,
@@ -25,10 +25,6 @@ function RecordsPage() {
     [navigate]
   );
   return (
-    <ReviewQueueScreen
-      onSearchChange={handleSearchChange}
-      scope="admin"
-      search={search}
-    />
+    <AdminRecordsScreen onSearchChange={handleSearchChange} search={search} />
   );
 }

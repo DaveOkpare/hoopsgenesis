@@ -8,6 +8,7 @@
  * Mutable on purpose: api.ts mutations push and update rows.
  */
 import { events as sharedEvents } from "@/features/fixtures";
+import { academyMembers } from "@/features/team-detail/fixtures";
 import type { AttendanceRecord, CalendarEvent } from "@/features/types";
 
 const CREATED = "2026-03-01T08:00:00Z";
@@ -91,6 +92,162 @@ export const attendanceRows: AttendanceRecord[] = [
   row("user-ivan-g", "2026-11-23T05:38:00Z", 58, LATE_TICKS),
   row("user-nadia-u", "2026-11-23T05:45:00Z", 33, LATE_TICKS),
 ];
+
+/** A row for the session detail designs (GN5-0 closed out, GFQ-0 not closed). */
+function designRow(
+  eventId: string,
+  sessionDate: string,
+  studentId: string,
+  fields: Partial<AttendanceRecord>
+): AttendanceRecord {
+  return {
+    id: `att-${eventId}-${studentId}`,
+    academyId: "acad-kigali",
+    eventId,
+    sessionDate,
+    studentId,
+    status: "present",
+    checkInAt: null,
+    checkInDistanceM: null,
+    checkOutAt: null,
+    checkOutDistanceM: null,
+    recordedBy: studentId,
+    verifiedAt: null,
+    verifiedBy: null,
+    voidedAt: null,
+    voidedBy: null,
+    voidReason: null,
+    notes: null,
+    ...fields,
+  };
+}
+
+const U14_WED = "event-u14-mw-2026-11-18";
+const U16_SAT = "event-u16-sat-2026-11-21";
+
+/** U14 Wed 18 Nov, closed out by Coach Patrick (GN5-0). */
+const u14Closed: AttendanceRecord[] = [
+  designRow(U14_WED, "2026-11-18", "user-kevin", {
+    status: "absent",
+    recordedBy: "user-patrick",
+  }),
+  designRow(U14_WED, "2026-11-18", "user-jean", {
+    status: "late",
+    checkInAt: "2026-11-18T13:48:00Z",
+    checkInDistanceM: 30,
+    verifiedAt: "2026-11-18T13:50:00Z",
+    verifiedBy: "user-patrick",
+  }),
+  designRow(U14_WED, "2026-11-18", "user-aline", {
+    status: "excused",
+    recordedBy: "user-patrick",
+    notes: "told the coach ahead",
+  }),
+  designRow(U14_WED, "2026-11-18", "user-olivier", {
+    checkInAt: "2026-11-18T13:31:00Z",
+    recordedBy: "user-sharika",
+    verifiedAt: "2026-11-18T13:31:00Z",
+    verifiedBy: "user-sharika",
+  }),
+  designRow(U14_WED, "2026-11-18", "user-divine-n", {
+    checkInAt: "2026-11-18T13:26:00Z",
+    checkInDistanceM: 22,
+    checkOutAt: "2026-11-18T15:02:00Z",
+    checkOutDistanceM: 31,
+    verifiedAt: "2026-11-18T13:40:00Z",
+    verifiedBy: "user-patrick",
+  }),
+];
+
+/** U16 Sat 21 Nov, ended but not closed out (GFQ-0): Samuel Mugabo never marked. */
+const u16Open: AttendanceRecord[] = [
+  designRow(U16_SAT, "2026-11-21", "user-samuel-i", {
+    status: "late",
+    checkInAt: "2026-11-21T07:14:00Z",
+    checkInDistanceM: 40,
+    checkOutAt: "2026-11-21T08:30:00Z",
+    checkOutDistanceM: 35,
+  }),
+];
+
+const MS_PER_MINUTE = 60_000;
+
+function studentsOf(teamId: string): string[] {
+  return academyMembers
+    .filter((m) => m.roles.includes("student") && m.teamIds.includes(teamId))
+    .map((m) => m.userId);
+}
+
+/** Everyone else on U14 came on 18 Nov (scanned, ticked), so the session is closed out. */
+const u14Rest = studentsOf("team-u14")
+  .filter((id) => !u14Closed.some((r) => r.studentId === id))
+  .map((id, index) =>
+    designRow(U14_WED, "2026-11-18", id, {
+      checkInAt: new Date(
+        Date.parse("2026-11-18T13:20:00Z") + index * MS_PER_MINUTE
+      ).toISOString(),
+      checkInDistanceM: 20 + index,
+      verifiedAt: "2026-11-18T13:45:00Z",
+      verifiedBy: "user-patrick",
+    })
+  );
+
+/** U16 on 21 Nov: all but four came (scanned in and out). */
+const U16_NEVER_MARKED = 4;
+const u16Others = studentsOf("team-u16").filter(
+  (id) => !u16Open.some((r) => r.studentId === id)
+);
+const u16Rest = u16Others
+  .slice(0, Math.max(0, u16Others.length - U16_NEVER_MARKED))
+  .map((id, index) =>
+    designRow(U16_SAT, "2026-11-21", id, {
+      status: index === 0 ? "late" : "present",
+      checkInAt: new Date(
+        Date.parse("2026-11-21T06:52:00Z") + index * 2 * MS_PER_MINUTE
+      ).toISOString(),
+      checkInDistanceM: 25 + index,
+      checkOutAt: index % 3 === 0 ? null : "2026-11-21T08:31:00Z",
+      checkOutDistanceM: index % 3 === 0 ? null : 30,
+      verifiedAt: index % 3 === 0 ? "2026-11-21T07:10:00Z" : null,
+      verifiedBy: index % 3 === 0 ? "user-patrick" : null,
+    })
+  );
+
+/**
+ * 91C-0 live session, U14 Mon 23 Nov 16:00 (?at=16:05): five scanned, one checked in by
+ * hand; the times are 15:42 to 16:04 Kigali.
+ */
+const U14_LIVE = "event-u14-training";
+const LIVE_TIMES = ["13:42", "13:47", "13:49", "13:51", "14:03"];
+const u14Live = studentsOf("team-u14")
+  .slice(0, LIVE_TIMES.length)
+  .map((id, index) =>
+    designRow(U14_LIVE, SESSION_DATE, id, {
+      status: index === LIVE_TIMES.length - 1 ? "late" : "present",
+      checkInAt: `${SESSION_DATE}T${LIVE_TIMES[index]}:00Z`,
+      checkInDistanceM: 30 + index,
+    })
+  );
+const handLive = studentsOf("team-u14")[LIVE_TIMES.length];
+if (handLive) {
+  u14Live.push(
+    designRow(U14_LIVE, SESSION_DATE, handLive, {
+      status: "late",
+      checkInAt: `${SESSION_DATE}T14:04:00Z`,
+      recordedBy: "user-sharika",
+      verifiedAt: `${SESSION_DATE}T14:04:00Z`,
+      verifiedBy: "user-sharika",
+    })
+  );
+}
+
+attendanceRows.push(
+  ...u14Closed,
+  ...u14Rest,
+  ...u16Open,
+  ...u16Rest,
+  ...u14Live
+);
 
 /** Photo stand-ins: the tinted circles from 3O4-0. */
 export const avatarTints: Record<string, string> = {

@@ -6,11 +6,13 @@
  * void / verify / regenerate transactions.
  */
 
-import type {
-  AuditDateFilter,
-  AuditLogItem,
-  AuditLogParams,
-  AuditTypeFilter,
+import {
+  ACTIONS_BY_TYPE,
+  type AuditDateFilter,
+  type AuditLogItem,
+  type AuditLogPage,
+  type AuditLogParams,
+  type AuditTypeFilter,
 } from "@/features/audit-log/api";
 import {
   auditLog,
@@ -69,40 +71,35 @@ let store: AuditLogItem[] = auditLog.map((entry) => {
 });
 
 function matchesType(action: string, type: AuditTypeFilter): boolean {
-  switch (type) {
-    case "all":
-      return true;
-    case "void":
-      return action.endsWith(".void");
-    case "check_out":
-      return action === "attendance.check_out";
-    case "review":
-      return action === "record.verify" || action === "record.reject";
-    case "roster":
-      return action.startsWith("team.");
-    case "qr":
-      return action === "academy.qr_regenerate";
-    default:
-      return true;
+  if (type === "all") {
+    return true;
   }
+  if (type === "roster" && action.startsWith("team.")) {
+    return true;
+  }
+  if (type === "qr" && action === "academy.qr_regenerate") {
+    return true;
+  }
+  return ACTIONS_BY_TYPE[type].includes(action);
 }
 
 /** Real: `GET /api/v1/academies/:academyId/audit-log?actorId=&action=&from=`, newest first. */
 export async function listAuditLog(
   academyId: Id,
   params: AuditLogParams
-): Promise<AuditLogItem[]> {
+): Promise<AuditLogPage> {
   await fixtureDelay();
   const from =
     params.date === "all"
       ? null
       : FIXTURE_NOW.getTime() - DAYS_BY_FILTER[params.date] * DAY_MS;
-  return [...store]
+  const items = [...store]
     .filter((entry) => entry.academyId === academyId)
     .filter((entry) => !params.actorId || entry.actorId === params.actorId)
     .filter((entry) => matchesType(entry.action, params.type))
     .filter((entry) => from === null || Date.parse(entry.createdAt) >= from)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  return { items, hasMore: false };
 }
 
 /** Everyone who appears as an actor, for the "Person" filter. */

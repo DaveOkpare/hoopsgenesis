@@ -15,7 +15,8 @@ import { useSignOut, useViewer } from "@/features/viewer/queries";
 import { viewerSubtitle } from "@/features/viewer/selectors";
 import { initials } from "@/lib/format";
 
-function useSignOutAndLeave() {
+/** Signs out, then goes to /login (also used by the phone "More" sheet). */
+export function useSignOutAndLeave() {
   const navigate = useNavigate();
   const signOut = useSignOut();
   return () =>
@@ -85,12 +86,13 @@ export function SidebarUserMenu({ tone }: { tone: "light" | "dark" }) {
 
 /**
  * Header avatar (36px circle) on phone home screens and the tablet top bar; opens the
- * same account menu. tone="dark" is the white avatar on the owner's ink top bar.
+ * same account menu. tone="dark" is the white avatar on the owner's ink top bar;
+ * tone="brand" the orange avatar in the owner's phone header ("[Owner · Mobile]").
  */
 export function AvatarUserMenu({
   tone = "light",
 }: {
-  tone?: "light" | "dark";
+  tone?: "light" | "dark" | "brand";
 } = {}) {
   const viewer = useViewer();
   const dark = tone === "dark";
@@ -105,7 +107,11 @@ export function AvatarUserMenu({
             : "focus-visible:ring-ink"
         )}
       >
-        <Avatar size={36} tone={dark ? "white" : "ink"}>
+        <Avatar
+          className={tone === "brand" ? "bg-orange text-ink" : undefined}
+          size={36}
+          tone={dark ? "white" : "ink"}
+        >
           <AvatarFallback>{initials(viewer.user.name)}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>

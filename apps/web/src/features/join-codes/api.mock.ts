@@ -19,6 +19,7 @@ import {
   type InvitationCodeRole,
   type InvitationCodeStatus,
   type InvitationCodeTeam,
+  type JoinedDetails,
   type JoinPreviewAs,
   type JoinSession,
   MAX_CODE_LIFETIME_MS,
@@ -36,10 +37,13 @@ import {
   codeSeeds,
   designedNewCode,
   joinerFixtures,
+  RATE_LIMITED_CODE,
+  RATE_LIMITED_FOR_SECONDS,
   WRONG_GUESS_LIMIT,
 } from "@/features/join-codes/fixtures";
 import type { Country, Id, Paginated, Timestamp } from "@/features/types";
 import { academyCountry } from "@/features/viewer/selectors";
+import { ApiError } from "@/lib/api-client";
 
 /** Who creates and revokes codes in preview (the admin persona). */
 const PREVIEW_ADMIN_ID = "user-sharika";
@@ -404,6 +408,16 @@ export async function getJoinSession(input: {
 
 /** Checks shared by preview and redeem, in the server's order. 404, then 410s. */
 function findActiveCode(raw: string): StoredCode {
+  if (normalizeCode(raw) === RATE_LIMITED_CODE) {
+    // 9KQ-0: the host's rate limit answering 429 (with a wait, which the real host
+    // doesn't send today).
+    throw new ApiError({
+      status: 429,
+      code: "rate_limited",
+      message: "Too many tries",
+      details: { retryAfterSeconds: RATE_LIMITED_FOR_SECONDS },
+    });
+  }
   const row = findByCode(raw);
   if (!row) {
     wrongGuesses += 1;
@@ -502,6 +516,29 @@ export async function redeemInvitationCode(input: {
   };
 }
 
+/** Place and next session after joining (9HB-0 / 9JO-0). */
+export async function getJoinedDetails(input: {
+  academyId: Id;
+  teamId: Id | null;
+}): Promise<JoinedDetails> {
+  await fixtureDelay();
+  const academy = academies.find((a) => a.id === input.academyId);
+  if (!academy) {
+    throw new Error(`Fixture academy ${input.academyId} is missing`);
+  }
+  return {
+    city: academy.shortName,
+    country: academyCountry(academy),
+    nextSession: input.teamId
+      ? {
+          sessionDate: "2026-11-24",
+          startTime: "17:00",
+          location: "Main court",
+        }
+      : null,
+  };
+}
+
 /**
  * NO ENDPOINT YET. The confirm screen (6WR-0 / 6WT-0) shows the academy's place
  * ("Kigali, Rwanda") and the team's coaches ("Patrick H., Sharika D."); the preview
@@ -525,7 +562,8 @@ export async function getJoinPreviewExtras(input: {
             m.roles.includes("coach") &&
             m.teamIds.includes(input.teamId ?? "")
         )
-        .map((m) => shortName(m.user.name))
+        // 9G0-0 / 6WR-0 write them "Coach Patrick, Coach Sharika".
+        .map((m) => `Coach ${m.user.name.trim().split(WHITESPACE)[0]}`)
         .sort((a, b) => a.localeCompare(b))
     : [];
   return {
@@ -536,13 +574,3 @@ export async function getJoinPreviewExtras(input: {
 }
 
 const WHITESPACE = /\s+/;
-
-/** "Patrick Habimana" -> "Patrick H."; "Sharika D." stays. */
-function shortName(name: string): string {
-  const [first, ...rest] = name.trim().split(WHITESPACE);
-  const last = rest.at(-1);
-  if (!last || last.endsWith(".")) {
-    return name;
-  }
-  return `${first} ${last.charAt(0)}.`;
-}

@@ -65,7 +65,7 @@ function sessionLink(session: Session, at: string | undefined) {
   return {
     to: "/coach/sessions/$eventId" as const,
     params: { eventId: session.event.id },
-    search: { at },
+    search: { at, date: session.sessionDate },
   };
 }
 
@@ -246,7 +246,12 @@ function DesktopAction({
     );
   }
   return (
-    <Link className={outline} {...sessionLink(session, at)}>
+    <Link
+      className={outline}
+      params={{ eventId: session.event.id }}
+      search={{ at, dialog: "edit" }}
+      to="/coach/events/$eventId"
+    >
       Edit
     </Link>
   );

@@ -15,14 +15,6 @@ import {
   EmptyTitle,
 } from "@hoops-genesis/ui/components/empty";
 import {
-  List,
-  ListRow,
-  ListRowChevron,
-  ListRowContent,
-  ListRowDescription,
-  ListRowTitle,
-} from "@hoops-genesis/ui/components/list";
-import {
   Eyebrow,
   PageActions,
   PageHeader,
@@ -49,6 +41,8 @@ import {
   teamListQueryOptions,
 } from "@/features/teams/queries";
 import type { Id } from "@/features/types";
+import { useActiveMembership } from "@/features/viewer/queries";
+import { firstName, formatDayMonth } from "@/lib/format";
 
 const SKELETON_CARDS = ["a", "b", "c", "d"] as const;
 
@@ -128,10 +122,12 @@ function PlaceOnTeamMenu({
   teams,
   students,
   className,
+  label = "Place on a team",
 }: {
   teams: TeamListItem[];
   students: CoachCandidate[];
   className?: string;
+  label?: string;
 }) {
   const navigate = useNavigate();
   const search = students.length === 1 ? (students[0]?.user.name ?? "") : "";
@@ -156,7 +152,7 @@ function PlaceOnTeamMenu({
           className
         )}
       >
-        Place on a team
+        {label}
       </DropdownMenuTrigger>
       <DropdownMenuContent>
         <DropdownMenuGroup>
@@ -218,7 +214,7 @@ function TeamGrid({
   withoutTeam: CoachCandidate[];
 }) {
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,344px))] gap-5 max-md:hidden">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,344px))] gap-5 max-md:hidden max-lg:grid-cols-2">
       {items.map((item) => (
         <TeamCard item={item} key={item.team.id} />
       ))}
@@ -229,64 +225,143 @@ function TeamGrid({
   );
 }
 
+const WHITESPACE = /\s+/;
+const DIGITS = /\d+/;
+const SHORT_NAME_MAX = 4;
+
+/** Badge text: "U12" stays, "Girls U16" becomes "G16" (7PI-0). */
+function teamBadge(name: string): string {
+  const words = name.trim().split(WHITESPACE);
+  if (words.length === 1 && name.length <= SHORT_NAME_MAX) {
+    return name.toUpperCase();
+  }
+  const last = words.at(-1) ?? "";
+  const digits = last.match(DIGITS)?.[0];
+  const head = (digits ? words.slice(0, -1) : words)
+    .map((word) => word.charAt(0).toUpperCase())
+    .join("");
+  return `${head}${digits ?? ""}`.slice(0, SHORT_NAME_MAX);
+}
+
+/** "Basketball · 16 students · Coach Sharika" / "… · 2 coaches" / "… · No coach". */
 function phoneSummary(item: TeamListItem): string {
-  return [
-    item.sport,
-    plural(item.studentCount, "student", "students"),
-    item.attendancePercent === null
-      ? null
-      : `${item.attendancePercent}% attendance`,
-  ]
+  let coaches = "No coach";
+  if (item.coaches.length === 1) {
+    coaches = `Coach ${firstName(item.coaches[0]?.name ?? "")}`;
+  } else if (item.coaches.length > 1) {
+    coaches = `${item.coaches.length} coaches`;
+  }
+  return [item.sport, plural(item.studentCount, "student", "students"), coaches]
     .filter(Boolean)
     .join(" · ");
 }
 
-/** Below md there is no design: List rows carrying the same facts as the cards. */
+function PhoneChevron() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="shrink-0"
+      height="16"
+      viewBox="0 0 16 16"
+      width="16"
+    >
+      <path
+        d="M6 3l5 5-5 5"
+        fill="none"
+        stroke="#6B6B6B"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
+/** "Eric Niyonzima joined on 20 Nov" / "Eric Niyonzima and Aline Uwase joined". */
+function joinedLine(students: CoachCandidate[], timeZone: string): string {
+  const [only] = students;
+  if (students.length === 1 && only?.joinedAt) {
+    return `${only.user.name} joined on ${formatDayMonth(only.joinedAt, timeZone)}`;
+  }
+  return `${joinNames(students.map((s) => s.user.name))} joined`;
+}
+
+/** Phone rows (7PI-0): badge, name, facts, attendance, chevron. */
 function TeamsList({
   items,
   withoutTeam,
+  timeZone,
 }: {
   items: TeamListItem[];
   withoutTeam: CoachCandidate[];
+  timeZone: string;
 }) {
   return (
-    <div className="md:hidden">
-      <List>
+    <div className="flex flex-col gap-[18px] md:hidden">
+      <ul className="flex flex-col">
         {items.map((item) => {
-          const coaches = coachLine(item);
+          const noCoach = item.coaches.length === 0;
           return (
-            <ListRow
-              className="items-start"
-              key={item.team.id}
-              render={
-                <Link
-                  params={{ teamId: item.team.id }}
-                  to="/admin/teams/$teamId"
-                />
-              }
-            >
-              <ListRowContent className="gap-1">
-                <ListRowTitle className="font-display font-normal text-[28px] leading-[30px]">
-                  {item.team.name}
-                </ListRowTitle>
-                <ListRowDescription className="text-ink">
-                  {phoneSummary(item)}
-                </ListRowDescription>
-                <ListRowDescription
-                  className={
-                    coaches ? undefined : "font-semibold text-orange-deep"
-                  }
+            <li className="border-line border-b" key={item.team.id}>
+              <Link
+                className="flex items-center gap-[14px] py-[14px] outline-none focus-visible:ring-2 focus-visible:ring-ink"
+                params={{ teamId: item.team.id }}
+                to="/admin/teams/$teamId"
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "flex size-11 shrink-0 items-center justify-center rounded-[12px] font-display text-base leading-5",
+                    noCoach ? "bg-orange text-ink" : "bg-ink text-white"
+                  )}
                 >
-                  {coaches ?? noCoachLine(item)}
-                </ListRowDescription>
-              </ListRowContent>
-              <ListRowChevron className="mt-2" />
-            </ListRow>
+                  {teamBadge(item.team.name)}
+                </span>
+                <span className="flex min-w-0 shrink grow basis-0 flex-col gap-[2px]">
+                  <span className="font-semibold text-[15px] text-ink leading-5">
+                    {item.team.name}
+                  </span>
+                  <span
+                    className={cn(
+                      "text-[13px] leading-4",
+                      noCoach ? "font-medium text-orange-deep" : "text-muted"
+                    )}
+                  >
+                    {phoneSummary(item)}
+                  </span>
+                </span>
+                <span
+                  className={cn(
+                    "w-11 shrink-0 text-right font-semibold text-sm leading-[18px]",
+                    noCoach ? "text-orange-deep" : "text-ink"
+                  )}
+                >
+                  {attendanceLabel(item)}
+                  <span className="sr-only"> attendance this month</span>
+                </span>
+                <PhoneChevron />
+              </Link>
+            </li>
           );
         })}
-      </List>
+      </ul>
       {withoutTeam.length > 0 ? (
-        <NoTeamCard students={withoutTeam} teams={items} />
+        <section className="flex items-center gap-[14px] rounded-md border-[#D4D4D0] border-[1.5px] border-dashed px-4 py-[14px]">
+          <div className="flex min-w-0 shrink grow basis-0 flex-col gap-[2px]">
+            <h2 className="font-semibold text-[15px] text-ink leading-5">
+              No team yet · {plural(withoutTeam.length, "student", "students")}
+            </h2>
+            <p className="text-[13px] text-muted leading-4">
+              {joinedLine(withoutTeam, timeZone)}
+            </p>
+          </div>
+          <PlaceOnTeamMenu
+            className="shrink-0 rounded-full border border-ink px-[14px] py-2 no-underline"
+            label="Place"
+            students={withoutTeam}
+            teams={items}
+          />
+        </section>
       ) : null}
     </div>
   );
@@ -295,14 +370,14 @@ function TeamsList({
 function TeamsSkeleton() {
   return (
     <>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,344px))] gap-5 max-md:hidden">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,344px))] gap-5 max-md:hidden max-lg:grid-cols-2">
         {SKELETON_CARDS.map((key) => (
           <Skeleton className="h-[191px] rounded-lg" key={key} />
         ))}
       </div>
       <div className="flex flex-col gap-3 md:hidden">
         {SKELETON_CARDS.map((key) => (
-          <Skeleton className="h-20" key={key} />
+          <Skeleton className="h-[60px] rounded-md" key={key} />
         ))}
       </div>
     </>
@@ -330,7 +405,7 @@ function TeamsEmpty({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-/** Teams, story AO-3: cards (72W-0), empty state (1UZ-0), phone rows (no design). */
+/** Teams, story AO-3: cards (72W-0), empty state (1UZ-0), phone rows (7PI-0). */
 export function TeamsScreen({
   academyId,
   forceEmpty,
@@ -342,6 +417,7 @@ export function TeamsScreen({
   onCreate: () => void;
 }) {
   const { data } = useQuery(teamListQueryOptions(academyId));
+  const timeZone = useActiveMembership()?.academy.timezone ?? "UTC";
   // Only the "students without a team" nudge: left out if it fails.
   const withoutTeam =
     useQuery({
@@ -365,11 +441,14 @@ export function TeamsScreen({
         {hasTeams ? (
           <PageActions>
             <Button
-              className="gap-[10px] px-[22px] py-3 leading-5 max-md:gap-2 max-md:px-4 max-md:py-[9px] max-md:text-sm max-md:leading-[18px]"
+              className="gap-[10px] px-[22px] py-3 leading-5 max-md:h-auto max-md:gap-[6px] max-md:px-4 max-md:py-[10px] max-md:text-sm max-md:leading-[18px]"
               onClick={onCreate}
             >
-              <PlusIcon />
-              Create team
+              <PlusIcon className="max-md:size-[14px]" />
+              <span className="max-md:hidden">Create team</span>
+              <span className="md:hidden">
+                Team<span className="sr-only"> (create)</span>
+              </span>
             </Button>
           </PageActions>
         ) : null}
@@ -379,7 +458,11 @@ export function TeamsScreen({
       {items && hasTeams ? (
         <>
           <TeamGrid items={items} withoutTeam={withoutTeam} />
-          <TeamsList items={items} withoutTeam={withoutTeam} />
+          <TeamsList
+            items={items}
+            timeZone={timeZone}
+            withoutTeam={withoutTeam}
+          />
         </>
       ) : null}
     </>

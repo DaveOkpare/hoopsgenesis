@@ -30,6 +30,7 @@ import {
   fillerAcademies,
   places,
 } from "@/features/owner-academies/fixtures";
+import { applyAdminChange } from "@/features/owner-users/api.mock";
 import type { Academy, AcademyRole, Id } from "@/features/types";
 
 const QR_RECENT_DAYS = 14;
@@ -281,6 +282,11 @@ export async function appointAcademyAdmin(input: {
     roles: ["admin", ...(roles ?? []).filter((r) => r !== "admin")],
   });
   row.counts.admins += 1;
+  applyAdminChange({
+    academy: row.academy,
+    userId: input.userId,
+    isAdmin: true,
+  });
   log(
     input.academyId,
     "academy.admin_appoint",
@@ -302,6 +308,11 @@ export async function removeAcademyAdmin(input: {
     throw new Error("Not an admin of this academy");
   }
   row.counts.admins = Math.max(0, row.counts.admins - 1);
+  applyAdminChange({
+    academy: row.academy,
+    userId: input.userId,
+    isAdmin: false,
+  });
   log(
     input.academyId,
     "academy.admin_remove",

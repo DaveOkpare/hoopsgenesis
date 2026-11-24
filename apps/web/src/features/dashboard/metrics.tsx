@@ -1,4 +1,4 @@
-import { Skeleton } from "@hoops-genesis/ui/components/skeleton";
+import { SkeletonStats } from "@hoops-genesis/ui/components/skeleton";
 import {
   Stat,
   StatHint,
@@ -100,7 +100,7 @@ export function DesktopMetrics({
 }) {
   const { attendance, outstanding, records } = summary;
   return (
-    <div className="grid grid-cols-4 gap-4 max-md:hidden max-lg:grid-cols-2">
+    <div className="grid grid-cols-4 gap-4 max-md:hidden max-xl:grid-cols-2">
       <TileLink
         label={`Attendance this week ${attendance.thisWeekPercent}%`}
         to="/admin/attendance"
@@ -144,16 +144,16 @@ export function DesktopMetrics({
         </Stat>
       </TileLink>
       <TileLink
-        label={`Records to review ${records.pendingCount}`}
+        label={`Records waiting for a coach ${records.pendingCount}`}
         to="/admin/records"
       >
         <Stat>
-          <StatLabel arrow>Records to review</StatLabel>
+          <StatLabel arrow>Records waiting</StatLabel>
           <StatValue>{records.pendingCount}</StatValue>
           <StatHint>
             {oldestDays === null
               ? "Nothing waiting"
-              : `Oldest waiting ${plural(oldestDays, "day")}`}
+              : `Coaches review them · oldest ${plural(oldestDays, "day")}`}
           </StatHint>
         </Stat>
       </TileLink>
@@ -254,7 +254,7 @@ export function PhoneMetrics({
             ? "Nothing waiting"
             : `Oldest ${plural(oldestDays, "day")}`
         }
-        label="Records to review"
+        label="Records waiting"
         to="/admin/records"
         value={records.pendingCount}
       />
@@ -264,19 +264,10 @@ export function PhoneMetrics({
 
 export function MetricsSkeleton() {
   return (
-    <>
-      <div className="grid grid-cols-4 gap-4 max-md:hidden max-lg:grid-cols-2">
-        <Skeleton className="h-[155px] rounded-[20px]" />
-        <Skeleton className="h-[155px] rounded-[20px]" />
-        <Skeleton className="h-[155px] rounded-[20px]" />
-        <Skeleton className="h-[155px] rounded-[20px]" />
-      </div>
-      <div className="grid grid-cols-2 gap-[10px] md:hidden">
-        <Skeleton className="h-[104px] rounded-[18px]" />
-        <Skeleton className="h-[104px] rounded-[18px]" />
-        <Skeleton className="h-[104px] rounded-[18px]" />
-        <Skeleton className="h-[104px] rounded-[18px]" />
-      </div>
-    </>
+    <SkeletonStats
+      className="max-xl:grid-cols-2"
+      count={4}
+      label="Loading the numbers"
+    />
   );
 }

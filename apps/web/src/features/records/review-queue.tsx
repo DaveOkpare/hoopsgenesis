@@ -1,5 +1,6 @@
 /*
- * Records review queue (1PT-0), shared by /admin/records and /coach/records.
+ * Records review queue (1PT-0), for coaches at /coach/records (academy admins get the
+ * read-only ./admin-records.tsx).
  * `scope="coach"` limits it to the coach's teams and hides their own entries.
  * URL state: ?tab=verified|rejected, ?id=<recordId> (selected / open on phones),
  * ?reject=1 (reject dialog for the selected record).
@@ -423,7 +424,7 @@ export function ReviewQueueScreen({
     <>
       <PageHeader>
         <PageHeading>
-          <Eyebrow>Academic and athletic records</Eyebrow>
+          <Eyebrow>Report cards and results</Eyebrow>
           <PageTitle>Waiting for review</PageTitle>
         </PageHeading>
       </PageHeader>

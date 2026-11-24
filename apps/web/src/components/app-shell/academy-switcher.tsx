@@ -1,9 +1,9 @@
 import { CountryDot } from "@hoops-genesis/ui/components/chip";
 import {
   Dialog,
-  DialogBody,
+  DialogClose,
   DialogContent,
-  DialogHeader,
+  DialogDescription,
   DialogTitle,
   DialogTrigger,
 } from "@hoops-genesis/ui/components/dialog";
@@ -56,13 +56,39 @@ function UpDownChevron() {
   );
 }
 
-function AcademyMeta({ membership }: { membership: Membership }) {
+const ROLE_ORDER = ["admin", "coach", "student"] as const;
+
+/** Every role in this academy, in plain words: "Admin and coach", "Coach". */
+function rolesLabel(membership: Membership): string {
+  const labels = ROLE_ORDER.filter((role) =>
+    membership.roles.includes(role)
+  ).map((role, index) =>
+    index === 0 ? roleLabel(role) : roleLabel(role).toLowerCase()
+  );
+  if (labels.length === 0) {
+    return roleLabel(primaryRole(membership));
+  }
+  if (labels.length === 1) {
+    return labels[0] ?? "";
+  }
+  return `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+}
+
+function AcademyMeta({
+  membership,
+  allRoles = false,
+}: {
+  membership: Membership;
+  /** "Rwanda · Admin and coach" instead of the main role only. */
+  allRoles?: boolean;
+}) {
   const country = academyCountry(membership.academy);
   return (
     <span className="flex items-center gap-[6px]">
       <CountryDot country={country} />
       <span className="truncate text-[13px] text-muted leading-4">
-        {countryName(country)} · {roleLabel(primaryRole(membership))}
+        {countryName(country)} ·{" "}
+        {allRoles ? rolesLabel(membership) : roleLabel(primaryRole(membership))}
       </span>
     </span>
   );
@@ -73,7 +99,10 @@ function useSwitchAcademy() {
   const navigate = useNavigate();
   const viewer = useViewer();
   const setActive = useSetActiveAcademy();
-  return (event: { currentTarget: HTMLElement }) => {
+  const pendingId = setActive.isPending
+    ? setActive.variables?.academyId
+    : undefined;
+  const switchTo = (event: { currentTarget: HTMLElement }) => {
     const { academyId } = event.currentTarget.dataset;
     const membership = viewer.memberships.find(
       (m) => m.academy.id === academyId
@@ -92,6 +121,7 @@ function useSwitchAcademy() {
       }
     );
   };
+  return { switchTo, pendingId };
 }
 
 /**
@@ -107,7 +137,7 @@ export function AcademySwitcher({
 } = {}) {
   const viewer = useViewer();
   const active = useActiveMembership();
-  const switchTo = useSwitchAcademy();
+  const { switchTo } = useSwitchAcademy();
   if (!active) {
     return null;
   }
@@ -196,15 +226,142 @@ function ChipChevron() {
   );
 }
 
+function SheetCloseIcon() {
+  return (
+    <svg aria-hidden="true" height="12" viewBox="0 0 14 14" width="12">
+      <path
+        d="M3 3l8 8M11 3l-8 8"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+/** 32px fog close button used by the phone sheets (More, Your academies); 44px hit area. */
+export function SheetCloseButton({ label = "Close" }: { label?: string }) {
+  return (
+    <DialogClose
+      aria-label={label}
+      className="relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-fog text-ink outline-none before:absolute before:-inset-1.5 focus-visible:ring-2 focus-visible:ring-ink"
+    >
+      <SheetCloseIcon />
+    </DialogClose>
+  );
+}
+
+function RadioMark({ checked }: { checked: boolean }) {
+  if (!checked) {
+    return (
+      <span
+        aria-hidden="true"
+        className="size-6 shrink-0 rounded-full border-[#C8C8C8] border-[1.5px]"
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-ink"
+    >
+      <svg aria-hidden="true" height="14" viewBox="0 0 16 16" width="14">
+        <path
+          d="M3.5 8.5l3 3 6-7"
+          fill="none"
+          stroke="#fff"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+      </svg>
+    </span>
+  );
+}
+
+/** Classes for the phone bottom sheets in the shell ("[Admin · Mobile] More sheet"). */
+export const SHELL_SHEET_CLASS =
+  "max-md:rounded-t-lg max-md:px-5 max-md:pb-[max(34px,env(safe-area-inset-bottom))]";
+
+/*
+ * The inside of the "Your academies" sheet ("[Admin · Mobile] Academy switcher", 856-0):
+ * title, one card per academy with a radio mark, and a note. Picking another academy
+ * calls the real setActiveAcademy, then goes to that academy's home for your role
+ * there. Render it inside a <DialogContent className={SHELL_SHEET_CLASS}>.
+ */
+export function AcademySwitcherSheet() {
+  const viewer = useViewer();
+  const active = useActiveMembership();
+  const { switchTo, pendingId } = useSwitchAcademy();
+  return (
+    <div className="flex flex-col gap-[14px] pt-[14px] md:p-7">
+      <div className="flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <DialogTitle className="text-[32px] leading-8 max-md:text-[32px] max-md:leading-8">
+            Your academies
+          </DialogTitle>
+          <DialogDescription className="text-muted text-sm leading-[18px] max-md:leading-[18px]">
+            You have a different role in each one.
+          </DialogDescription>
+        </div>
+        <SheetCloseButton />
+      </div>
+      <ul aria-label="Academies" className="flex flex-col gap-2">
+        {viewer.memberships.map((membership) => {
+          const isActive = membership.academy.id === active?.academy.id;
+          const isPending = pendingId === membership.academy.id;
+          return (
+            <li key={membership.academy.id}>
+              <button
+                aria-current={isActive ? "true" : undefined}
+                className={cn(
+                  "flex w-full cursor-pointer items-center gap-3 rounded-md p-[14px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 disabled:cursor-progress",
+                  isActive
+                    ? "border-[1.5px] border-ink"
+                    : "border border-line hover:bg-fog"
+                )}
+                data-academy-id={membership.academy.id}
+                disabled={Boolean(pendingId)}
+                onClick={switchTo}
+                type="button"
+              >
+                <BrandMark size={40} tone={isActive ? "orange" : "ink"} />
+                <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
+                  <span className="font-semibold text-[15px] text-ink leading-5">
+                    {membership.academy.name}
+                  </span>
+                  <AcademyMeta allRoles membership={membership} />
+                </span>
+                {isPending ? (
+                  <span className="shrink-0 text-[13px] text-muted leading-4">
+                    Switching…
+                  </span>
+                ) : (
+                  <RadioMark checked={isActive} />
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[13px] text-muted leading-[18px]">
+        Switching takes you to that academy’s home. Your menu changes to match
+        your role there.
+      </p>
+    </div>
+  );
+}
+
 /**
- * Phone header row on home screens: academy chip (opens a switcher sheet when there is
- * more than one academy) and the account avatar. Hidden from md up, where the sidebar
- * shows the same things. Render it at the top of a page: <MobileAcademyBar />.
+ * Phone header row on home screens: academy chip (opens the "Your academies" sheet when
+ * there is more than one academy) and the account avatar. Hidden from md up, where the
+ * sidebar or tablet top bar shows the same things. Render it at the top of a page:
+ * <MobileAcademyBar />.
  */
 export function MobileAcademyBar() {
   const viewer = useViewer();
   const active = useActiveMembership();
-  const switchTo = useSwitchAcademy();
   if (!active) {
     return null;
   }
@@ -221,6 +378,7 @@ export function MobileAcademyBar() {
       {viewer.memberships.length > 1 ? (
         <Dialog>
           <DialogTrigger
+            aria-label={`Academy: ${active.academy.name}. Switch academy`}
             className={cn(
               chipClass,
               "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ink"
@@ -229,35 +387,8 @@ export function MobileAcademyBar() {
             {chip}
             <ChipChevron />
           </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Your academies</DialogTitle>
-            </DialogHeader>
-            <DialogBody className="gap-1 pb-8">
-              {viewer.memberships.map((membership) => {
-                const isActive = membership.academy.id === active.academy.id;
-                return (
-                  <button
-                    className={cn(
-                      "flex items-center gap-3 rounded-[14px] p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ink",
-                      isActive && "bg-fog"
-                    )}
-                    data-academy-id={membership.academy.id}
-                    key={membership.academy.id}
-                    onClick={switchTo}
-                    type="button"
-                  >
-                    <BrandMark size={36} tone={isActive ? "orange" : "ink"} />
-                    <span className="flex min-w-0 flex-col">
-                      <span className="font-semibold text-[15px] text-ink leading-5">
-                        {membership.academy.name}
-                      </span>
-                      <AcademyMeta membership={membership} />
-                    </span>
-                  </button>
-                );
-              })}
-            </DialogBody>
+          <DialogContent className={SHELL_SHEET_CLASS}>
+            <AcademySwitcherSheet />
           </DialogContent>
         </Dialog>
       ) : (

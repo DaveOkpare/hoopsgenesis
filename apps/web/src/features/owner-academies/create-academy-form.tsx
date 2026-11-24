@@ -77,7 +77,7 @@ function buildSchema(takenSlugs: string[]) {
       .refine((slug) => !takenSlugs.includes(slug), "This address is taken"),
     timezone: z.string().min(1, "Pick a time zone"),
     defaultCurrency: z.string().min(1, "Pick a currency"),
-    address: z.string().trim().min(1, "Search for the academy's address"),
+    address: z.string().trim().min(1, "Enter the academy's address"),
     latitude: z
       .number()
       .nullable()
@@ -443,7 +443,11 @@ function AddressField({
           onBlur={field.handleBlur}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder="Search the address"
+          placeholder={
+            places.length > 0
+              ? "Search the address"
+              : "Type the address, then place the pin below"
+          }
           value={field.state.value as string}
         />
         <datalist id="academy-address-places">
@@ -454,6 +458,113 @@ function AddressField({
       </label>
       <Hint field={field} id="academy-address-hint" />
     </Field>
+  );
+}
+
+const MAX_LAT = 90;
+const MAX_LNG = 180;
+const COORD_DECIMALS = 5;
+
+function parseCoordinate(text: string, max: number): number | null {
+  const value = Number(text.trim());
+  return text.trim() !== "" && Number.isFinite(value) && Math.abs(value) <= max
+    ? value
+    : null;
+}
+
+/**
+ * Latitude and longitude by hand. There is no geocoder yet, so without these the
+ * map (which opens on Kigali) can't reach an academy in another city. While a box
+ * is being typed in it shows the draft; otherwise it shows the pin.
+ */
+function CoordinatesFields({
+  latitude,
+  longitude,
+  onChange,
+}: {
+  latitude: number | null;
+  longitude: number | null;
+  onChange: (point: LatLng) => void;
+}) {
+  const [draft, setDraft] = useState<{ lat?: string; lng?: string }>({});
+  const shown = {
+    lat:
+      draft.lat ?? (latitude === null ? "" : latitude.toFixed(COORD_DECIMALS)),
+    lng:
+      draft.lng ??
+      (longitude === null ? "" : longitude.toFixed(COORD_DECIMALS)),
+  };
+  const apply = useCallback(
+    (next: { lat: string; lng: string }) => {
+      const lat = parseCoordinate(next.lat, MAX_LAT);
+      const lng = parseCoordinate(next.lng, MAX_LNG);
+      if (lat !== null && lng !== null) {
+        onChange({ latitude: lat, longitude: lng });
+      }
+    },
+    [onChange]
+  );
+  const handleLat = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const lat = event.target.value;
+      setDraft((d) => ({ ...d, lat }));
+      apply({ lat, lng: shown.lng });
+    },
+    [apply, shown.lng]
+  );
+  const handleLng = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const lng = event.target.value;
+      setDraft((d) => ({ ...d, lng }));
+      apply({ lat: shown.lat, lng });
+    },
+    [apply, shown.lat]
+  );
+  // Once both boxes hold a valid pair the pin has it, so show the pin again; a
+  // half-typed pair stays as typed.
+  const clearDraft = useCallback(() => {
+    const complete =
+      parseCoordinate(shown.lat, MAX_LAT) !== null &&
+      parseCoordinate(shown.lng, MAX_LNG) !== null;
+    if (complete) {
+      setDraft({});
+    }
+  }, [shown.lat, shown.lng]);
+  const inputClass =
+    "w-full min-w-0 rounded-[14px] border-2 border-transparent bg-fog px-[14px] py-3 text-[15px] text-ink leading-[18px] outline-none focus:border-ink focus:bg-white";
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="pb-2 font-semibold text-ink text-sm leading-[18px]">
+        Or type the coordinates
+      </legend>
+      <div className="flex gap-3">
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-[13px] text-muted leading-4">
+          Latitude
+          <input
+            className={inputClass}
+            inputMode="decimal"
+            onBlur={clearDraft}
+            onChange={handleLat}
+            placeholder="-1.94410"
+            value={shown.lat}
+          />
+        </label>
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-[13px] text-muted leading-4">
+          Longitude
+          <input
+            className={inputClass}
+            inputMode="decimal"
+            onBlur={clearDraft}
+            onChange={handleLng}
+            placeholder="30.06190"
+            value={shown.lng}
+          />
+        </label>
+      </div>
+      <p className="text-[13px] text-muted leading-4">
+        Copy them from any map app. The map moves there and the pin follows.
+      </p>
+    </fieldset>
   );
 }
 
@@ -586,6 +697,14 @@ export function CreateAcademyForm() {
     },
     [form]
   );
+  /** Typed coordinates move the map there and drop the pin on them. */
+  const handleCoordinates = useCallback(
+    (point: LatLng) => {
+      setCenter(point);
+      handlePinChange(point);
+    },
+    [handlePinChange]
+  );
   const handleRadiusChange = useCallback(
     (radius: number) => form.setFieldValue("attendanceRadiusM", radius),
     [form]
@@ -627,7 +746,11 @@ export function CreateAcademyForm() {
               {(field) => (
                 <SelectField
                   field={field}
-                  hint="Set from the pin"
+                  hint={
+                    places.length > 0
+                      ? "Set from the address you pick"
+                      : "Check-in times use this zone"
+                  }
                   id="academy-timezone"
                   items={TIME_ZONES}
                   label="Time zone"
@@ -696,6 +819,11 @@ export function CreateAcademyForm() {
                     </div>
                   )}
                 </form.Field>
+                <CoordinatesFields
+                  latitude={latitude}
+                  longitude={longitude}
+                  onChange={handleCoordinates}
+                />
                 <RadiusSlider onChange={handleRadiusChange} value={radius} />
               </>
             )}

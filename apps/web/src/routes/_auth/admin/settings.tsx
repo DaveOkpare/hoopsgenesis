@@ -1,11 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { RouteStub } from "@/components/route-stub";
+import { AcademySettingsScreen } from "@/features/academy-settings/settings-screen";
+import { useActiveMembership } from "@/features/viewer/queries";
 
 export const Route = createFileRoute("/_auth/admin/settings")({
-  component: AcademysettingsPage,
+  component: AcademySettingsPage,
 });
 
-function AcademysettingsPage() {
-  return <RouteStub eyebrow="Hoops Genesis Kigali" title="Academy settings" />;
+function AcademySettingsPage() {
+  const academyId = useActiveMembership()?.academy.id;
+  if (!academyId) {
+    return null;
+  }
+  return <AcademySettingsScreen academyId={academyId} key={academyId} />;
 }

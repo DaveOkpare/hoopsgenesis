@@ -27,6 +27,10 @@ import { type ChangeEvent, type ReactNode, useCallback, useMemo } from "react";
 
 import { PlusIcon } from "@/components/icons";
 import { downloadCsv, toCsv } from "@/features/fees/export-csv";
+import {
+  PaymentDetailPanel,
+  PhonePaymentDetail,
+} from "@/features/fees/payment-detail";
 import { PaymentsPanel } from "@/features/fees/payments-panel";
 import {
   addMonths,
@@ -38,6 +42,7 @@ import {
   periodMonthName,
   periodOf,
   periodShortLabel,
+  periodStart,
 } from "@/features/fees/periods";
 import {
   currentTime,
@@ -51,6 +56,7 @@ import {
 import { RecordPaymentDialog } from "@/features/fees/record-payment-dialog";
 import type { FeesSearch, FeesTab } from "@/features/fees/search";
 import {
+  EveryonePaid,
   groupUnpaid,
   TeamChips,
   type UnpaidGroup,
@@ -59,7 +65,7 @@ import {
 import { VoidPaymentDialog } from "@/features/fees/void-payment-dialog";
 import type { Id } from "@/features/types";
 import { useActiveMembership, useViewer } from "@/features/viewer/queries";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatDayMonth } from "@/lib/format";
 import { useIsPhone } from "@/lib/use-is-phone";
 
 const PERCENT = 100;
@@ -79,7 +85,7 @@ function SummaryCard({
   hint: ReactNode;
 }) {
   return (
-    <div className="flex flex-1 basis-0 flex-col gap-[10px] rounded-[20px] bg-fog px-[22px] py-5">
+    <div className="flex flex-col gap-[10px] rounded-[20px] bg-fog px-[22px] py-5">
       <p className="font-medium text-muted text-sm leading-[18px]">{label}</p>
       <p className="flex items-baseline gap-[6px]">
         <span className="font-semibold text-[15px] text-muted leading-[18px]">
@@ -97,17 +103,20 @@ function SummaryCard({
 function FeeSummaryCards({ summary }: { summary: FeeSummary | undefined }) {
   if (!summary) {
     return (
-      <div className="flex gap-4 max-md:hidden">
-        <Skeleton className="h-[136px] flex-1 rounded-[20px]" />
-        <Skeleton className="h-[136px] flex-1 rounded-[20px]" />
-        <Skeleton className="h-[136px] flex-1 rounded-[20px]" />
+      <div className="grid grid-cols-3 gap-4 max-md:hidden md:max-lg:grid-cols-2">
+        <Skeleton className="h-[136px] rounded-[20px]" />
+        <Skeleton className="h-[136px] rounded-[20px]" />
+        <Skeleton className="h-[136px] rounded-[20px] md:max-lg:col-span-2 md:max-lg:h-[58px]" />
       </div>
     );
   }
   const online = Math.round(summary.onlineShare * PERCENT);
   const month = periodMonthName(summary.period);
   return (
-    <section aria-label="This month" className="flex gap-4 max-md:hidden">
+    <section
+      aria-label="This month"
+      className="grid grid-cols-3 gap-4 max-md:hidden md:max-lg:grid-cols-2"
+    >
       <SummaryCard
         hint={
           <p className="text-muted text-sm leading-[18px]">
@@ -122,24 +131,36 @@ function FeeSummaryCards({ summary }: { summary: FeeSummary | undefined }) {
         hint={
           <p className="font-semibold text-orange-deep text-sm leading-[18px]">
             {summary.unpaidStudentCount} students
+            {summary.outstandingIsEstimate ? (
+              <span
+                className="font-normal text-muted"
+                title="Some unpaid students were never billed, so part of this is estimated from their last payment or unknown."
+              >
+                {" "}
+                · partly estimated
+              </span>
+            ) : null}
           </p>
         }
         label="Outstanding"
         unit={summary.outstanding.currency}
         value={formatAmount(summary.outstanding.amount)}
       />
-      <div className="flex flex-1 basis-0 flex-col gap-[10px] rounded-[20px] bg-fog px-[22px] py-5">
-        <p className="font-medium text-muted text-sm leading-[18px]">
+      <div className="flex flex-col gap-[10px] rounded-[20px] bg-fog px-[22px] py-5 md:max-lg:col-span-2 md:max-lg:flex-row md:max-lg:items-center md:max-lg:gap-5 md:max-lg:py-[18px]">
+        <p className="shrink-0 font-medium text-muted text-sm leading-[18px]">
           Paid online vs cash
         </p>
-        <div aria-hidden="true" className="flex gap-1 pt-[14px]">
+        <div
+          aria-hidden="true"
+          className="flex gap-1 pt-[14px] md:max-lg:flex-1 md:max-lg:pt-0"
+        >
           <div
             className="h-[10px] rounded-full bg-ink"
             style={{ width: `${online}%` }}
           />
           <div className="h-[10px] flex-1 rounded-full bg-[#C8C8C8]" />
         </div>
-        <p className="pt-1 text-muted text-sm leading-[18px]">
+        <p className="shrink-0 pt-1 text-muted text-sm leading-[18px] md:max-lg:pt-0">
           {online}% mobile money · {PERCENT - online}% cash
         </p>
       </div>
@@ -268,19 +289,54 @@ function exportPayments(rows: PaymentRow[], period: PeriodKey) {
 
 function exportUnpaid(groups: UnpaidGroup[], period: PeriodKey) {
   const csv = toCsv(
-    ["Team", "Student", "Last payment", "Days overdue", "Amount", "Currency"],
+    [
+      "Team",
+      "Student",
+      "Last payment",
+      "Days overdue",
+      "Amount",
+      "Currency",
+      "Amount estimated",
+    ],
     groups.flatMap((group) =>
       group.rows.map((row) => [
         group.label,
         row.student.name,
         row.lastPaidAt?.slice(0, 10) ?? "Never",
         row.daysOverdue,
-        Number(row.amount),
-        row.currency,
+        row.owed ? Number(row.owed.amount) : null,
+        row.owed?.currency ?? null,
+        row.owed?.estimated ? "Yes" : "No",
       ])
     )
   );
   downloadCsv(`unpaid-${period}.csv`, csv);
+}
+
+/** BPK-0 for this month; academy totals only when no team filter is on. */
+function EveryonePaidFor({
+  period,
+  summary,
+  teamName,
+  onSeePayments,
+}: {
+  period: PeriodKey;
+  summary: FeeSummary | undefined;
+  teamName: string | null;
+  onSeePayments: () => void;
+}) {
+  const next = addMonths(period, 1);
+  return (
+    <EveryonePaid
+      collected={teamName ? null : (summary?.collected ?? null)}
+      month={periodMonthName(period)}
+      nextMonth={periodMonthName(next)}
+      nextStart={formatDayMonth(`${periodStart(next)}T12:00:00Z`)}
+      onSeePayments={onSeePayments}
+      paidStudentCount={teamName ? null : (summary?.paidStudentCount ?? null)}
+      teamName={teamName}
+    />
+  );
 }
 
 /* ---------- Screen ---------- */
@@ -338,8 +394,8 @@ export function FeesScreen({
     const rows = teamId
       ? outstanding.data.filter((row) => row.teamId === teamId)
       : outstanding.data;
-    return groupUnpaid(rows, now, timeZone);
-  }, [outstanding.data, teamId, now, timeZone]);
+    return groupUnpaid(rows);
+  }, [outstanding.data, teamId]);
 
   const teamCounts = useMemo(() => {
     const counts = new Map<Id | null, number>();
@@ -361,7 +417,7 @@ export function FeesScreen({
   );
   const handleQueryChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) =>
-      onSearchChange({ q: event.target.value || undefined }),
+      onSearchChange({ q: event.target.value || undefined, page: undefined }),
     [onSearchChange]
   );
   const handlePeriodChange = useCallback(
@@ -369,6 +425,7 @@ export function FeesScreen({
       onSearchChange({
         period: next === thisPeriod ? undefined : next,
         highlight: undefined,
+        page: undefined,
       }),
     [onSearchChange, thisPeriod]
   );
@@ -396,13 +453,37 @@ export function FeesScreen({
         student: undefined,
         tab: "payments",
         q: undefined,
+        page: undefined,
         period: feePeriod === thisPeriod ? undefined : feePeriod,
         highlight: feeId,
+        fee: feeId,
       }),
     [onSearchChange, thisPeriod]
   );
+  const handleOpenPayment = useCallback(
+    (feeId: Id) => onSearchChange({ fee: feeId, highlight: feeId }),
+    [onSearchChange]
+  );
+  const handleClosePayment = useCallback(
+    () => onSearchChange({ fee: undefined }),
+    [onSearchChange]
+  );
+  const handlePage = useCallback(
+    (next: number) => onSearchChange({ page: next > 1 ? next : undefined }),
+    [onSearchChange]
+  );
+  const handleSeePayments = useCallback(
+    () =>
+      onSearchChange({
+        tab: "payments",
+        period: undefined,
+        q: undefined,
+        page: undefined,
+      }),
+    [onSearchChange]
+  );
   const handleVoid = useCallback(
-    (feeId: Id) => onSearchChange({ void: feeId, highlight: undefined }),
+    (feeId: Id) => onSearchChange({ void: feeId }),
     [onSearchChange]
   );
   const handleVoidOpenChange = useCallback(
@@ -422,6 +503,44 @@ export function FeesScreen({
   }, [tab, visiblePayments, unpaidGroups, period, thisPeriod]);
 
   const unpaidCount = summary.data?.unpaidStudentCount;
+
+  const dialogs = (
+    <>
+      <RecordPaymentDialog
+        academyId={academyId}
+        initialStudentId={search.student}
+        onOpenChange={handleRecordOpenChange}
+        onViewPayment={handleViewPayment}
+        open={Boolean(search.record)}
+        timeZone={timeZone}
+        viewerId={viewerId}
+      />
+      <VoidPaymentDialog
+        academyId={academyId}
+        fee={voidTarget}
+        onOpenChange={handleVoidOpenChange}
+        open={Boolean(search.void)}
+        timeZone={timeZone}
+        viewerId={viewerId}
+      />
+    </>
+  );
+
+  // GOA-0: on phones the payment is its own page.
+  if (isPhone && search.fee) {
+    return (
+      <>
+        <PhonePaymentDetail
+          academyId={academyId}
+          feeId={search.fee}
+          onBack={handleClosePayment}
+          onVoid={handleVoid}
+          timeZone={timeZone}
+        />
+        {dialogs}
+      </>
+    );
+  }
 
   return (
     <>
@@ -451,8 +570,8 @@ export function FeesScreen({
         onValueChange={handleTabChange}
         value={tab}
       >
-        <div className="flex items-center justify-between gap-4">
-          <TabsList>
+        <div className="flex items-center justify-between gap-4 md:max-lg:flex-col md:max-lg:items-stretch">
+          <TabsList className="md:max-lg:self-start">
             <TabsTrigger className="max-md:order-last" value="payments">
               Payments
             </TabsTrigger>
@@ -468,7 +587,7 @@ export function FeesScreen({
               <>
                 <SearchInput
                   aria-label="Search student or reference"
-                  className="w-[240px]"
+                  className="w-[240px] md:max-lg:w-auto md:max-lg:flex-1"
                   onChange={handleQueryChange}
                   placeholder="Search student or reference"
                   value={query}
@@ -514,7 +633,10 @@ export function FeesScreen({
           <PaymentsPanel
             highlightId={search.highlight}
             isLoading={payments.isPending}
+            onOpen={handleOpenPayment}
+            onPage={handlePage}
             onVoid={handleVoid}
+            page={search.page ?? 1}
             period={period}
             query={query}
             rows={visiblePayments}
@@ -531,6 +653,19 @@ export function FeesScreen({
             teams={teams.data ?? []}
           />
           <UnpaidPanel
+            everyonePaid={
+              <EveryonePaidFor
+                onSeePayments={handleSeePayments}
+                period={thisPeriod}
+                summary={summary.data}
+                teamName={
+                  teamId
+                    ? (teams.data?.find((team) => team.id === teamId)?.name ??
+                      "This team")
+                    : null
+                }
+              />
+            }
             groups={unpaidGroups}
             isLoading={outstanding.isPending}
             onRecord={handleRecord}
@@ -539,23 +674,14 @@ export function FeesScreen({
         </TabsContent>
       </Tabs>
 
-      <RecordPaymentDialog
+      <PaymentDetailPanel
         academyId={academyId}
-        initialStudentId={search.student}
-        onOpenChange={handleRecordOpenChange}
-        onViewPayment={handleViewPayment}
-        open={Boolean(search.record)}
+        feeId={isPhone ? undefined : search.fee}
+        onClose={handleClosePayment}
+        onVoid={handleVoid}
         timeZone={timeZone}
-        viewerId={viewerId}
       />
-      <VoidPaymentDialog
-        academyId={academyId}
-        fee={voidTarget}
-        onOpenChange={handleVoidOpenChange}
-        open={Boolean(search.void)}
-        timeZone={timeZone}
-        viewerId={viewerId}
-      />
+      {dialogs}
     </>
   );
 }

@@ -13,7 +13,7 @@ import {
   recordTitle,
 } from "@/features/records/describe";
 import { type ReviewItem, useOpenRecordFile } from "@/features/records/queries";
-import { isApiError } from "@/lib/api-client";
+import { errorMessage, isApiError } from "@/lib/api-client";
 import { firstName } from "@/lib/format";
 import { isUiPreview } from "@/lib/preview";
 
@@ -79,7 +79,7 @@ function DocumentPreview({ label }: { label: string }) {
   return (
     <div
       aria-label={label}
-      className="flex w-[300px] max-w-full shrink-0 flex-col gap-3 bg-white px-[22px] py-6 shadow-[0_2px_10px_#11111114]"
+      className="flex w-[300px] max-w-full flex-1 shrink-0 flex-col gap-3 bg-white px-[22px] py-6 shadow-[0_2px_10px_#11111114]"
       role="img"
     >
       <div className="h-[10px] w-[60%] rounded-[3px] bg-ink-soft" />
@@ -101,10 +101,28 @@ function DocumentPreview({ label }: { label: string }) {
   );
 }
 
-/** Opens the attached file through a fresh signed link (GET /records/:id). */
-function OpenFileButton({ item }: { item: ReviewItem }) {
+const STORAGE_MISSING =
+  "File storage isn't set up on this server, so the file can't be opened.";
+
+/**
+ * "report-card-term3.pdf · Open": fetches a fresh signed link (GET /records/:id; they
+ * expire after 5 minutes, so never cached) and opens it. Without object storage the
+ * server answers 503 `storage_not_configured`, shown in place of the link.
+ */
+export function OpenFileLink({
+  item,
+  className,
+}: {
+  item: ReviewItem;
+  className?: string;
+}) {
   const openFile = useOpenRecordFile(item.academyId);
+  const storageMissing = isApiError(openFile.error, "storage_not_configured");
   const handleClick = useCallback(async () => {
+    if (isUiPreview) {
+      toast("Preview mode has no stored files.");
+      return;
+    }
     try {
       const file = await openFile.mutateAsync(item.id);
       if (file) {
@@ -113,32 +131,97 @@ function OpenFileButton({ item }: { item: ReviewItem }) {
         toast.error("This record has no file attached.");
       }
     } catch (error) {
-      toast.error(
-        isApiError(error, "storage_not_configured")
-          ? "Files can't be opened yet: file storage isn't set up on this server."
-          : "Couldn't open the file. Try again."
-      );
+      if (!isApiError(error, "storage_not_configured")) {
+        toast.error(errorMessage(error, "Couldn't open the file. Try again."));
+      }
     }
   }, [item.id, openFile]);
+  if (storageMissing) {
+    return (
+      <p
+        className={cn(
+          "max-w-[300px] text-center text-[13px] text-muted leading-[18px]",
+          className
+        )}
+        role="status"
+      >
+        {STORAGE_MISSING}
+      </p>
+    );
+  }
+  const name = recordFileName(item) ?? "File";
   return (
-    <Button
-      className="self-center"
+    <button
+      className={cn(
+        "cursor-pointer rounded-sm font-semibold text-[13px] text-ink leading-4 underline decoration-1 underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ink disabled:cursor-default disabled:opacity-60",
+        className
+      )}
       disabled={openFile.isPending}
       onClick={handleClick}
-      size="sm"
-      variant="outline"
+      type="button"
     >
-      {openFile.isPending ? "Opening…" : "Open file"}
-    </Button>
+      {openFile.isPending ? "Opening…" : `${name} · Open`}
+    </button>
   );
 }
 
-function Preview({ item }: { item: ReviewItem }) {
-  const hasDocument = item.hasFile;
+function PencilIcon() {
+  return (
+    <svg aria-hidden="true" height="18" viewBox="0 0 18 18" width="18">
+      <path
+        d="M3 14.5l1-3.5 8-8 2.5 2.5-8 8z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+      />
+      <path d="M10.5 4.5l2.5 2.5" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+/** F4U-0: the record was typed in, with no file to look at. */
+export function NoFileCard({
+  item,
+  className,
+}: {
+  item: ReviewItem;
+  className?: string;
+}) {
+  const who = isSelfUpload(item)
+    ? firstName(item.student.name)
+    : firstName(item.recordedByName);
   return (
     <div
       className={cn(
-        "flex flex-[1.3] basis-0 flex-col items-center justify-center gap-3 rounded-[14px] bg-fog p-6 max-md:flex-none max-md:basis-auto max-md:p-5",
+        "flex items-center gap-[14px] rounded-[20px] border-[#D6D6D6] border-[1.5px] border-dashed bg-white px-[18px] py-4",
+        className
+      )}
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-[12px] bg-fog text-ink">
+        <PencilIcon />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
+        <span className="font-semibold text-[15px] text-ink leading-5">
+          No file attached
+        </span>
+        <span className="text-[13px] text-muted leading-[18px]">
+          {who} typed these in. There is no file to look at.
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function Preview({ item, readOnly }: { item: ReviewItem; readOnly: boolean }) {
+  const hasDocument = item.hasFile;
+  if (readOnly && !hasDocument) {
+    return <NoFileCard className="flex-[1.3] basis-0 self-start" item={item} />;
+  }
+  return (
+    <div
+      className={cn(
+        "flex flex-[1.3] basis-0 flex-col items-center gap-3 rounded-[14px] bg-fog p-6 max-md:flex-none max-md:basis-auto max-md:p-5",
         !hasDocument && "self-start"
       )}
     >
@@ -147,8 +230,7 @@ function Preview({ item }: { item: ReviewItem }) {
           <DocumentPreview
             label={`${recordFileName(item) ?? recordTitle(item)}, preview`}
           />
-          {/* Preview has no stored files; keep the drawn document only. */}
-          {isUiPreview ? null : <OpenFileButton item={item} />}
+          <OpenFileLink item={item} />
         </>
       ) : (
         <div className="flex min-h-40 flex-col items-center justify-center gap-2 text-center text-muted text-sm leading-[18px]">
@@ -256,40 +338,96 @@ export function RecordHeader({
   );
 }
 
-export function RecordBody({ item }: { item: ReviewItem }) {
-  const fields = recordFields(item);
-  const enteredBy = isSelfUpload(item)
+/** "Aline" in "What Aline entered". */
+export function enteredByName(item: ReviewItem): string {
+  return isSelfUpload(item)
     ? firstName(item.student.name)
     : firstName(item.recordedByName);
-  const { hasFile } = item;
+}
+
+export const READ_ONLY_NOTE =
+  "Coaches review records. You can read them here, but not change them.";
+
+function InfoNote({ children }: { children: string }) {
   return (
-    <div className="flex flex-1 gap-5 p-6 max-md:flex-col max-md:p-0">
-      <Preview item={item} />
+    <div className="flex gap-[10px] rounded-[12px] bg-fog p-[14px]">
+      <InfoIcon />
+      <p className="text-ink-soft text-sm leading-body">{children}</p>
+    </div>
+  );
+}
+
+/** The rejection note the student saw (read-only views). */
+export function RejectionNote({ item }: { item: ReviewItem }) {
+  if (item.status !== "rejected" || !item.reviewNote) {
+    return null;
+  }
+  return (
+    <div className="flex flex-col gap-1 rounded-[12px] bg-orange-soft p-[14px]">
+      <p className="font-semibold text-orange-deep text-sm leading-[18px]">
+        Note to {firstName(item.student.name)}
+      </p>
+      <p className="text-ink text-sm leading-body">“{item.reviewNote}”</p>
+    </div>
+  );
+}
+
+/** Field rows of a record; the read-only artboards use these on every size. */
+export function EnteredFields({
+  item,
+  className,
+}: {
+  item: ReviewItem;
+  className?: string;
+}) {
+  return (
+    <dl className={cn("flex flex-col", className)}>
+      {recordFields(item).map((field) => (
+        <div
+          className="flex justify-between gap-4 border-line border-b py-[11px] text-[15px] leading-[18px] last:border-b-0"
+          key={field.label}
+        >
+          <dt className="text-muted">{field.label}</dt>
+          <dd className="text-right font-medium text-ink">{field.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export function RecordBody({
+  item,
+  readOnly = false,
+  className,
+}: {
+  item: ReviewItem;
+  readOnly?: boolean;
+  className?: string;
+}) {
+  const { hasFile } = item;
+  let note: string | null = null;
+  if (readOnly) {
+    note = READ_ONLY_NOTE;
+  } else if (item.status === "pending") {
+    note = hasFile
+      ? "Check the numbers match the file. Once verified, the record is final."
+      : "Check the numbers look right. Once verified, the record is final.";
+  }
+  return (
+    <div
+      className={cn(
+        "flex flex-1 gap-5 p-6 max-md:flex-col max-md:p-0",
+        className
+      )}
+    >
+      <Preview item={item} readOnly={readOnly} />
       <div className="flex flex-1 basis-0 flex-col gap-[18px] max-md:basis-auto">
         <h3 className="font-semibold text-[13px] text-muted uppercase leading-4 tracking-label">
-          What {enteredBy} entered
+          What {enteredByName(item)} entered
         </h3>
-        <dl className="flex flex-col">
-          {fields.map((field) => (
-            <div
-              className="flex justify-between gap-4 border-line border-b py-[11px] text-[15px] leading-[18px] last:border-b-0"
-              key={field.label}
-            >
-              <dt className="text-muted">{field.label}</dt>
-              <dd className="text-right font-medium text-ink">{field.value}</dd>
-            </div>
-          ))}
-        </dl>
-        {item.status === "pending" ? (
-          <div className="flex gap-[10px] rounded-[12px] bg-fog p-[14px]">
-            <InfoIcon />
-            <p className="text-ink-soft text-sm leading-body">
-              {hasFile
-                ? "Check the numbers match the file. Once verified, the record is final."
-                : "Check the numbers look right. Once verified, the record is final."}
-            </p>
-          </div>
-        ) : null}
+        <EnteredFields item={item} />
+        {readOnly ? <RejectionNote item={item} /> : null}
+        {note ? <InfoNote>{note}</InfoNote> : null}
       </div>
     </div>
   );

@@ -112,13 +112,16 @@ function Joiners({
   );
 }
 
-function ExtendMenu({
+/** "Extend" (preview only: no endpoint changes a code's expiry). */
+export function ExtendMenu({
   academyId,
+  className,
   code,
   now,
   timeZone,
 }: {
   academyId: Id;
+  className?: string;
   code: InvitationCode;
   now: Date;
   timeZone: string;
@@ -159,7 +162,7 @@ function ExtendMenu({
       <DropdownMenuTrigger
         render={
           <Button
-            className="flex-1 basis-0 py-[11px] text-sm"
+            className={cn("flex-1 basis-0 py-[11px] text-sm", className)}
             disabled={options.length === 0 || extend.isPending}
             variant="outline"
           />

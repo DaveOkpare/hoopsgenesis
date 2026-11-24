@@ -13,7 +13,7 @@ import { useRef } from "react";
 import {
   type AttendanceEntryInput,
   cancelSession,
-  checkOutAttendance,
+  changeAttendance,
   deleteSeries,
   getSession,
   listSessionsOn,
@@ -158,10 +158,32 @@ export function useUnverifyAttendance(academyId: Id) {
   });
 }
 
-export function useCheckOutAttendance(academyId: Id) {
+interface ChangeInput {
+  asOf: Timestamp;
+  entry: AttendanceEntryInput;
+  eventId: Id;
+  reason: string;
+  rowId: Id;
+  sessionDate: DateOnly;
+}
+
+/** Admin: replace a recorded row (void + record), one Idempotency-Key per change. */
+export function useChangeAttendance(academyId: Id) {
   const invalidate = useInvalidateSessions(academyId);
+  const last = useRef<{ input: ChangeInput; key: string } | null>(null);
   return useMutation({
-    mutationFn: (input: { id: Id }) => checkOutAttendance(academyId, input),
+    mutationFn: (input: ChangeInput) => {
+      const previous = last.current;
+      const key =
+        previous && JSON.stringify(previous.input) === JSON.stringify(input)
+          ? previous.key
+          : newIdempotencyKey();
+      last.current = { input, key };
+      return changeAttendance(academyId, { ...input, idempotencyKey: key });
+    },
+    onSuccess: () => {
+      last.current = null;
+    },
     onSettled: invalidate,
   });
 }

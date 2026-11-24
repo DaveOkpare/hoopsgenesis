@@ -124,6 +124,19 @@ const sidebarPaths: Record<NavIconName, ReactNode> = {
 };
 
 const tabPaths: Partial<Record<NavIconName, ReactNode>> = {
+  /* Owner phone tab bar ("[Owner · Mobile] Academies"). */
+  academies: (
+    <path
+      d="M3 10.5L12 4l9 6.5V20a1 1 0 01-1 1h-5v-6h-6v6H4a1 1 0 01-1-1z"
+      strokeLinejoin="round"
+    />
+  ),
+  activity: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" strokeLinecap="round" />
+    </>
+  ),
   dashboard: (
     <>
       <rect height="8" rx="2" width="8" x="3" y="3" />

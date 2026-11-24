@@ -47,6 +47,8 @@ export interface ReviewItem extends StudentRecord {
    */
   reviewerNames: string[];
   student: { id: Id; name: string; teamId: Id | null; teamName: string | null };
+  /** The student's team has at least one coach (who may be the recorder). */
+  teamHasCoach: boolean;
   /** Who verified or rejected it; null while pending. */
   verifiedByName: string | null;
 }
@@ -104,8 +106,11 @@ function toItem(row: ServerRecord, teams: Map<Id, StudentTeam>): ReviewItem {
     createdAt: row.createdAt,
     recordedByName: row.recordedBy?.name ?? "Someone",
     reviewerNames: (team?.coaches ?? [])
-      .filter((coach) => coach.id !== row.recordedById && coach.id !== row.studentId)
+      .filter(
+        (coach) => coach.id !== row.recordedById && coach.id !== row.studentId
+      )
       .map((coach) => coach.name),
+    teamHasCoach: (team?.coaches.length ?? 0) > 0,
     verifiedByName: row.verifiedBy?.name ?? null,
     student: {
       id: row.studentId,

@@ -6,7 +6,7 @@ import {
   PageHeading,
   PageTitle,
 } from "@hoops-genesis/ui/components/page-header";
-import { Skeleton } from "@hoops-genesis/ui/components/skeleton";
+import { SkeletonCard } from "@hoops-genesis/ui/components/skeleton";
 import { cn } from "@hoops-genesis/ui/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -56,7 +56,8 @@ export function DashboardHeader({
   return (
     <>
       <MobileAcademyBar />
-      <PageHeader>
+      {/* Tablet (8BW-0): the two buttons wrap under a 48px one-line title. */}
+      <PageHeader className="md:max-lg:flex-col md:max-lg:items-start">
         <PageHeading>
           <Eyebrow>
             <span className="max-md:hidden">
@@ -66,7 +67,7 @@ export function DashboardHeader({
               {formatShortWeekdayDate(now, timeZone)}
             </span>
           </Eyebrow>
-          <PageTitle>
+          <PageTitle className="md:max-lg:text-[48px]">
             <span className="max-md:hidden">
               {hello}, {name}
             </span>
@@ -166,7 +167,7 @@ export function DashboardScreen({
       <PhoneActions />
       {summary && sessions ? (
         <>
-          <div className="flex items-stretch gap-4 max-md:hidden max-lg:flex-col">
+          <div className="flex items-stretch gap-4 max-md:hidden max-xl:flex-col">
             <AttentionCard items={items} />
             <TodaySessionsCard sessions={sessions} />
           </div>
@@ -182,8 +183,8 @@ export function DashboardScreen({
         </>
       ) : (
         <div className="flex gap-4 max-md:hidden">
-          <Skeleton className="h-[358px] flex-[1.25] rounded-[20px]" />
-          <Skeleton className="h-[358px] flex-1 rounded-[20px]" />
+          <SkeletonCard className="flex-[1.25]" label="Loading" lines={5} />
+          <SkeletonCard className="flex-1" label="Loading" lines={5} />
         </div>
       )}
     </>

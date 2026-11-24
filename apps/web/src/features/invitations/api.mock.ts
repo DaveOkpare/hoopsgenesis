@@ -67,7 +67,7 @@ export async function getInvitation(input: {
   const invitation = inviteFixtures.find((i) => i.id === input.invitationId);
   return invitation
     ? { kind: "found", invitation: toDetails(invitation), signedIn: false }
-    : { kind: "not-found" };
+    : { kind: "not-found", signedIn: false };
 }
 
 /** Accept the invitation as the signed-in user (call after sign-up or sign-in). */

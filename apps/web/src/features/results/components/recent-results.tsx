@@ -66,7 +66,7 @@ export function RecentResults({
       {recent.length === 0 && current === null ? (
         <p className="text-muted text-sm leading-[18px]">No results yet.</p>
       ) : (
-        <ol className="flex h-[56px] items-end justify-between">
+        <ol className="flex min-h-[56px] items-end justify-between">
           {recent.map((result, index) => {
             const score = resultScore(result.data, template);
             const isBest = index === star;
@@ -126,11 +126,14 @@ export function RecentResults({
   );
 }
 
-/** "New best by 1" / "Equals the best" / "Best is 7", or null before any result. */
+const POSSESSIVE = { she: "her", he: "his", they: "their" } as const;
+
+/** "New best by 1" / "Same as her best" / "Best is 7", or null before any result. */
 export function bestNote(
   results: PastResult[],
   template: ResultTemplate,
-  current: number | null
+  current: number | null,
+  pronoun: keyof typeof POSSESSIVE = "they"
 ): { text: string; tone: "success" | "muted" } | null {
   if (current === null || results.length === 0) {
     return null;
@@ -146,7 +149,7 @@ export function bestNote(
     return { text: `New best by ${diff}${unit}`, tone: "success" };
   }
   if (diff === 0) {
-    return { text: "Equals the best", tone: "muted" };
+    return { text: `Same as ${POSSESSIVE[pronoun]} best`, tone: "success" };
   }
   return { text: `Best is ${best}${unit}`, tone: "muted" };
 }

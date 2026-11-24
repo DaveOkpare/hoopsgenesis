@@ -44,6 +44,8 @@ export interface TeamCoach {
 }
 
 export interface TeamDetail {
+  /** Team attendance this month (the server's team rate); null with no sessions. */
+  attendancePercent: number | null;
   coaches: TeamCoach[];
   /** Not in the schema (shown in the eyebrow: "Basketball · Under 14"); null in real mode. */
   sport: string | null;
@@ -73,6 +75,7 @@ function shiftDate(date: DateOnly, days: number): DateOnly {
 
 interface AttendanceSummary {
   students: { rate: number | null; studentId: Id }[];
+  team: { rate: number | null };
 }
 
 interface AttendanceRow {
@@ -265,6 +268,10 @@ export async function getTeamDetail(
       createdAt: team.createdAt,
     },
     sport: null,
+    attendancePercent:
+      summary.team.rate === null
+        ? null
+        : Math.round(summary.team.rate * PERCENT),
     students: studentRows.map((row) => {
       const rate = rates.get(row.userId);
       return {
@@ -379,4 +386,66 @@ export async function removeTeamMember(
       organizationId: academyId,
     })
   );
+}
+
+/** One session of the team, for the Sessions tab on the coach's phone team page. */
+export interface TeamSession {
+  cancelled: boolean;
+  eventId: Id;
+  location: string | null;
+  sessionDate: DateOnly;
+  /** "16:00"; null for an all-day event. */
+  startTime: string | null;
+  title: string;
+}
+
+interface SessionOccurrence {
+  cancelled: boolean;
+  id: Id;
+  location: string | null;
+  sessionDate: DateOnly;
+  startTime: string | null;
+  teamId: Id | null;
+  title: string;
+}
+
+const UPCOMING_DAYS = 28;
+
+/**
+ * The team's sessions from today for four weeks, cancelled ones included.
+ * GET /events?teamId=&from=today&to=+28 days&includeCancelled=true.
+ */
+export async function listTeamSessions(
+  academyId: Id,
+  params: { teamId: Id; today: DateOnly }
+): Promise<TeamSession[]> {
+  if (mock) {
+    return (await mock()).listTeamSessions(academyId, params);
+  }
+  const rows = await apiAll<SessionOccurrence>(
+    academyPath(academyId, "/events"),
+    {
+      query: {
+        teamId: params.teamId,
+        from: params.today,
+        to: shiftDate(params.today, UPCOMING_DAYS),
+        includeCancelled: true,
+      },
+    }
+  );
+  return rows
+    .filter((row) => row.teamId === params.teamId)
+    .map((row) => ({
+      eventId: row.id,
+      sessionDate: row.sessionDate,
+      startTime: row.startTime,
+      title: row.title,
+      location: row.location,
+      cancelled: row.cancelled,
+    }))
+    .sort((a, b) =>
+      `${a.sessionDate} ${a.startTime ?? ""}`.localeCompare(
+        `${b.sessionDate} ${b.startTime ?? ""}`
+      )
+    );
 }

@@ -3,9 +3,10 @@ import { CountryDot } from "@hoops-genesis/ui/components/chip";
 import { cn } from "@hoops-genesis/ui/lib/utils";
 
 import {
+  AuthBackContent,
   AuthTitle,
+  authBackClass,
   authSubmitClass,
-  ChevronLeftIcon,
 } from "@/components/auth/auth-parts";
 import { BrandMark } from "@/components/brand-mark";
 import type { InvitationCodePreview } from "@/features/join-codes/queries";
@@ -120,15 +121,13 @@ export function ConfirmCode({
 }) {
   return (
     <div className="flex flex-col gap-[22px] max-md:flex-1 max-md:gap-5">
-      <Button
-        aria-label="Back to the code"
-        className="md:hidden"
+      <button
+        className={cn(authBackClass, "max-md:size-9")}
         onClick={onWrongCode}
-        size="icon"
-        variant="secondary"
+        type="button"
       >
-        <ChevronLeftIcon />
-      </Button>
+        <AuthBackContent label="Change code" />
+      </button>
       <p className="font-medium text-muted text-sm uppercase leading-[18px] tracking-label max-md:text-[13px] max-md:leading-4">
         Code {displayCode}
       </p>

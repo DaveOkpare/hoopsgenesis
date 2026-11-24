@@ -133,6 +133,7 @@ function JoinCodesPage() {
     <>
       <JoinCodesScreen
         academyId={academy.id}
+        academyName={academy.name}
         onNew={openNew}
         onRevoke={openRevoke}
         onSection={goToSection}

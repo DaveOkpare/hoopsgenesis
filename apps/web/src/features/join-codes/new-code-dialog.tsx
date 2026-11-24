@@ -44,6 +44,10 @@ import {
   plainDayIn,
 } from "@/features/join-codes/describe";
 import {
+  type CodeFormField,
+  codeFormServerErrors,
+} from "@/features/join-codes/form-errors";
+import {
   CODE_LIMITS,
   type InvitationCode,
   type InvitationCodeRole,
@@ -266,8 +270,10 @@ function UsesControl({
     () => usesField.handleChange("upTo"),
     [usesField]
   );
+  // The count's own errors, or a server error put on the choice (form-errors.ts).
   const message =
-    uses === "upTo" ? errorText(upToField.state.meta.errors) : null;
+    (uses === "upTo" ? errorText(upToField.state.meta.errors) : null) ??
+    errorText(usesField.state.meta.errors);
 
   return (
     <fieldset className="flex flex-col gap-2">
@@ -419,6 +425,12 @@ function ExpiryControl({
         ))}
       </div>
       {expiry === "date" ? dateControl : null}
+      {/* A server error on a preset expiry ("7 days" etc.); the date has its own. */}
+      {expiry !== "date" && errorText(field.state.meta.errors) ? (
+        <FieldMessage tone="error">
+          {errorText(field.state.meta.errors)}
+        </FieldMessage>
+      ) : null}
       <p
         className="text-[13px] text-muted leading-[18px]"
         id="code-expiry-hint"
@@ -492,9 +504,20 @@ function NewCodeForm({
         });
         onCreated(code);
       } catch (error) {
-        toast.error(
-          errorMessage(error, "Couldn't create the code. Try again.")
-        );
+        const fieldErrors = Object.entries(
+          codeFormServerErrors(error, value)
+        ) as [CodeFormField, string][];
+        for (const [name, message] of fieldErrors) {
+          form.setFieldMeta(name, (meta) => ({
+            ...meta,
+            errorMap: { ...meta.errorMap, onSubmit: message },
+          }));
+        }
+        if (fieldErrors.length === 0) {
+          toast.error(
+            errorMessage(error, "Couldn't create the code. Try again.")
+          );
+        }
       }
     },
   });

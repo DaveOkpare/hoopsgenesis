@@ -80,6 +80,13 @@ function toItem(record: StudentRecord): ReviewItem {
     student,
     recordedByName: nameOf(record.recordedBy),
     reviewerNames: reviewersOf(record, student.teamId),
+    teamHasCoach: members.some(
+      (m) =>
+        m.academyId === record.academyId &&
+        m.roles.includes("coach") &&
+        student.teamId !== null &&
+        m.teamIds.includes(student.teamId)
+    ),
     verifiedByName: record.verifiedBy ? nameOf(record.verifiedBy) : null,
   };
 }

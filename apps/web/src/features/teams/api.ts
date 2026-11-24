@@ -55,6 +55,8 @@ export interface TeamListItem {
 
 /** An academy member who can be put on a team (identified by user id). */
 export interface CoachCandidate {
+  /** When they joined the academy (member.createdAt). */
+  joinedAt?: Timestamp;
   user: UserSummary;
 }
 
@@ -179,7 +181,7 @@ export async function listStudentsWithoutTeam(
   const { members } = await fetchMembersWithTeams(academyId);
   return members
     .filter((m) => m.roles.includes("student") && m.teamIds.length === 0)
-    .map((m) => ({ user: m.user }));
+    .map((m) => ({ user: m.user, joinedAt: m.createdAt }));
 }
 
 /** Coaches in the academy, for the Create team coach picker (Better Auth members). */

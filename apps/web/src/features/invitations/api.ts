@@ -53,7 +53,11 @@ export type InvitationLookup =
       signedIn: boolean;
     }
   /** Unknown id, or no longer pending (accepted, cancelled, expired): Better Auth doesn't say which. */
-  | { kind: "not-found" }
+  | {
+      kind: "not-found";
+      /** Real mode only reads invitations signed in; the preview fixtures are "signed out". */
+      signedIn: boolean;
+    }
   /** Nobody signed in: the invitation can't be read yet. */
   | { kind: "signed-out" }
   /** Signed in with a different email than the one invited. */
@@ -125,7 +129,7 @@ export async function getInvitation(input: {
   if (result.error) {
     return result.error.status === FORBIDDEN
       ? { kind: "wrong-account", signedInAs: session.user.email }
-      : { kind: "not-found" };
+      : { kind: "not-found", signedIn: true };
   }
   const row = result.data as unknown as Record<string, unknown>;
   const expiresAt = toIso(row.expiresAt);

@@ -3,6 +3,7 @@
  * `asOf` is the session clock (clock.ts): rows are returned as they stood at that time,
  * so one data set draws both the live and the close-out designs.
  */
+import { detailEvents } from "@/features/events/fixtures";
 import { academies, fixtureDelay, teams, users } from "@/features/fixtures";
 import type {
   AttendanceEntryInput,
@@ -217,7 +218,7 @@ export async function getSession(
   params: { date?: DateOnly; asOf: Timestamp }
 ): Promise<Session | null> {
   await fixtureDelay();
-  const event = calendarEvents.find(
+  const event = [...calendarEvents, ...detailEvents].find(
     (e) => e.id === eventId && e.academyId === academy.id
   );
   if (!event) {
@@ -269,7 +270,7 @@ export async function recordAttendance(
     if (exists) {
       throw new Error("This student already has attendance for this session.");
     }
-    const id = `att-${input.eventId}-${input.sessionDate}-${entry.studentId}`;
+    const id = `att-${input.eventId}-${input.sessionDate}-${entry.studentId}-${attendanceRows.length}`;
     const record: AttendanceRecord = {
       id,
       academyId,
@@ -340,17 +341,30 @@ export async function unverifyAttendance(
   return { id: input.id };
 }
 
-export async function checkOutAttendance(
-  _academyId: Id,
-  input: { id: Id }
-): Promise<SessionAttendance> {
-  await fixtureDelay();
-  const found = findRow(input.id);
-  if (found.checkOutAt) {
-    throw new Error("Already checked out");
+/** Admin "Change": void the row, then record the new one (as api.ts does). */
+export async function changeAttendance(
+  academyId: Id,
+  input: {
+    rowId: Id;
+    reason: string;
+    eventId: Id;
+    sessionDate: DateOnly;
+    entry: AttendanceEntryInput;
+    asOf: Timestamp;
+    idempotencyKey: string;
   }
-  found.checkOutAt = new Date().toISOString();
-  return toSessionRow(found);
+): Promise<SessionAttendance[]> {
+  const found = findRow(input.rowId);
+  found.voidedAt = input.asOf;
+  found.voidedBy = PREVIEW_VIEWER;
+  found.voidReason = input.reason;
+  return await recordAttendance(academyId, {
+    eventId: input.eventId,
+    sessionDate: input.sessionDate,
+    entries: [input.entry],
+    asOf: input.asOf,
+    idempotencyKey: input.idempotencyKey,
+  });
 }
 
 export async function cancelSession(
@@ -358,7 +372,9 @@ export async function cancelSession(
   input: { eventId: Id; sessionDate: DateOnly; reason: string }
 ): Promise<{ eventId: Id; sessionDate: DateOnly }> {
   await fixtureDelay();
-  const event = calendarEvents.find((e) => e.id === input.eventId);
+  const event = [...calendarEvents, ...detailEvents].find(
+    (e) => e.id === input.eventId
+  );
   if (!event) {
     throw new Error("Session not found");
   }

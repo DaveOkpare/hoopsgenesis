@@ -8,16 +8,30 @@ import type {
 import {
   type AthleticData,
   buildResultData,
+  DESIGN_FOOTBALL_TEMPLATES,
   DESIGN_TEMPLATES,
   type DrillId,
+  type ExtraValues,
   type ResultTemplate,
 } from "@/features/results/templates";
 import { calendarEvents } from "@/features/sessions/fixtures";
-import { academyMembers } from "@/features/team-detail/fixtures";
+import {
+  academyMembers,
+  pronouns,
+  teamSport,
+} from "@/features/team-detail/fixtures";
 import type { DateOnly, Id, StudentRecord } from "@/features/types";
 
-/** Jean's free throws from 3P1-0, oldest first. */
+/** Jean's free throws (3P1-0) and Grace's penalties (IEF-0), oldest first. */
 const history: (PastResult & { studentId: Id })[] = [
+  ...[4, 5, 7, 6].map((made, index) => ({
+    id: `res-grace-${index}`,
+    studentId: "user-grace-i",
+    recordedOn: ["2026-10-26", "2026-11-02", "2026-11-09", "2026-11-16"][
+      index
+    ] as DateOnly,
+    data: { drill: "penalties", made, attempts: 10 },
+  })),
   {
     id: "res-jean-1",
     studentId: "user-jean",
@@ -47,35 +61,55 @@ const history: (PastResult & { studentId: Id })[] = [
 const SEED_DATES: DateOnly[] = ["2026-11-02", "2026-11-09", "2026-11-16"];
 const SEED_MADE = [4, 6, 5];
 const SEED_SECONDS = [44, 42, 43];
+const SEED_TOUCHES = [24, 31, 28];
 
 /** Three past results for anyone else, so the chart is never empty in preview. */
 function seeded(studentId: Id, drill: DrillId): PastResult[] {
   return SEED_DATES.map((recordedOn, index) => ({
     id: `res-${studentId}-${drill}-${index}`,
     recordedOn,
-    data:
-      drill === "dribbling"
-        ? { drill, seconds: SEED_SECONDS[index] ?? 45 }
-        : { drill, made: SEED_MADE[index] ?? 5, attempts: 10 },
+    data: seededData(drill, index),
   }));
+}
+
+function seededData(drill: DrillId, index: number): AthleticData {
+  if (drill === "dribbling") {
+    return { drill, seconds: SEED_SECONDS[index] ?? 45 };
+  }
+  if (drill === "juggling") {
+    return { drill, touches: SEED_TOUCHES[index] ?? 30 };
+  }
+  return { drill, made: SEED_MADE[index] ?? 5, attempts: 10 };
 }
 
 /** The preview coach (Sharika). */
 const PREVIEW_VIEWER = "user-sharika";
 
+/**
+ * The drills drawn for the team's sport: football for Girls U16 (IEF-0), basketball
+ * otherwise (3P1-0). Real mode has no sport and returns the server's templates.
+ */
 export async function listResultTemplates(
-  _academyId: Id
+  _academyId: Id,
+  params: { teamId: Id | null }
 ): Promise<ResultTemplate[]> {
   await fixtureDelay();
-  return DESIGN_TEMPLATES;
+  const sport = params.teamId ? teamSport[params.teamId] : undefined;
+  return sport === "Football" ? DESIGN_FOOTBALL_TEMPLATES : DESIGN_TEMPLATES;
 }
+
+/**
+ * Preview only: the preview coach (Sharika) is not on Girls U16 in the fixtures, but
+ * IEF-0 shows a coach logging Grace's penalties, so the picker also lists that team.
+ */
+const PREVIEW_EXTRA_TEAMS = ["team-girls-u16"];
 
 export async function listCoachStudents(
   academyId: Id,
   params: { teams: { id: Id; name: string }[] }
 ): Promise<CoachStudent[]> {
   await fixtureDelay();
-  const teamIds = params.teams.map((t) => t.id);
+  const teamIds = [...params.teams.map((t) => t.id), ...PREVIEW_EXTRA_TEAMS];
   return academyMembers
     .filter((m) => m.academyId === academyId && m.roles.includes("student"))
     .flatMap((m) => {
@@ -86,6 +120,8 @@ export async function listCoachStudents(
             {
               id: m.userId,
               name: m.user.name,
+              pronoun: pronouns[m.userId] ?? "they",
+              sport: teamSport[team.id] ?? null,
               teamId: team.id,
               teamName: team.name,
             },
@@ -137,13 +173,18 @@ export async function createAthleticRecord(
     recordedOn: DateOnly;
     template: ResultTemplate;
     score: number;
+    extras?: ExtraValues;
     eventId?: Id;
   }
 ): Promise<StudentRecord> {
   await fixtureDelay();
   const id = `record-new-${nextRecord}`;
   nextRecord += 1;
-  const data = buildResultData(input.template, input.score) as AthleticData;
+  const data = buildResultData(
+    input.template,
+    input.score,
+    input.extras
+  ) as AthleticData;
   history.push({
     id,
     studentId: input.studentId,
@@ -157,7 +198,7 @@ export async function createAthleticRecord(
     recordType: "athletic",
     recordedBy: PREVIEW_VIEWER,
     recordedOn: input.recordedOn,
-    data: { ...data, sport: "basketball", eventId: input.eventId },
+    data: { ...data, eventId: input.eventId },
     schemaVersion: 1,
     fileUrl: null,
     status: "pending",

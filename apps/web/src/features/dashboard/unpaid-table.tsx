@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@hoops-genesis/ui/components/select";
-import { Skeleton } from "@hoops-genesis/ui/components/skeleton";
+import { SkeletonList } from "@hoops-genesis/ui/components/skeleton";
 import {
   Table,
   TableActionsHead,
@@ -109,7 +109,42 @@ function UnpaidRows({
   );
   return (
     <>
-      <Table>
+      {/* Tablet (768 to 1023, 8BW-0): two-line rows instead of the five-column table. */}
+      <ul className="border-line border-t lg:hidden">
+        {data.data.length === 0 ? (
+          <li className="py-[14px] text-muted text-sm">
+            Everyone on this team has paid.
+          </li>
+        ) : null}
+        {data.data.map((row) => (
+          <li
+            className="flex items-center gap-[14px] border-line border-b py-[14px]"
+            key={row.studentId}
+          >
+            <Avatar size={36}>
+              <AvatarFallback>{initials(row.studentName)}</AvatarFallback>
+            </Avatar>
+            <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
+              <span className="truncate font-semibold text-[15px] text-ink leading-5">
+                {row.studentName}
+              </span>
+              <span className="truncate text-muted text-sm leading-[18px]">
+                {row.teamName ?? "No team"} ·{" "}
+                {row.lastPaidAt
+                  ? `Last paid ${monthAndDay(row.lastPaidAt, timeZone)}`
+                  : "Never paid"}
+              </span>
+            </span>
+            <span className="flex w-[110px] shrink-0 justify-end">
+              <OverdueBadge now={now} row={row} timeZone={timeZone} />
+            </span>
+            <span className="w-[100px] shrink-0 text-right font-semibold text-[15px] text-ink leading-5">
+              {row.amount ? formatMoney(row.amount) : "—"}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <Table className="max-lg:hidden">
         <TableHeader className="border-t">
           <TableRow className="border-b-0">
             <TableHead>Student</TableHead>
@@ -258,12 +293,12 @@ export function UnpaidCard({
       {unpaid ? (
         <UnpaidRows data={unpaid} now={now} timeZone={timeZone} />
       ) : (
-        <div className="flex flex-col gap-3 border-line border-t py-4">
-          <Skeleton className="h-8" />
-          <Skeleton className="h-8" />
-          <Skeleton className="h-8" />
-          <Skeleton className="h-8" />
-        </div>
+        <SkeletonList
+          className="border-line border-t"
+          label="Loading unpaid students"
+          rows={4}
+          trailing
+        />
       )}
     </Card>
   );

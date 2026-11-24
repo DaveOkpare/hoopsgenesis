@@ -11,19 +11,44 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useAcademyClock } from "@/features/student-calendar/queries";
 import {
   FeeDueCard,
+  NoFeeRecordCard,
   PaidUpCard,
   PaymentHistory,
 } from "@/features/student-fees/fee-views";
-import { myFeesQueryOptions } from "@/features/student-fees/queries";
+import {
+  type MyFees,
+  myFeesQueryOptions,
+} from "@/features/student-fees/queries";
+import type { DateOnly } from "@/features/types";
 import { useActiveMembership } from "@/features/viewer/queries";
 
-export const Route = createFileRoute("/_auth/student/fees")({
+export const Route = createFileRoute("/_auth/student/fees/")({
   component: FeesPage,
 });
+
+const GRID =
+  "grid items-start gap-8 max-md:gap-5 lg:grid-cols-[440px_minmax(0,1fr)]";
+
+function StandingCard({ fees, today }: { fees: MyFees; today: DateOnly }) {
+  if (fees.due) {
+    return (
+      <FeeDueCard
+        due={fees.due}
+        onlinePayment={fees.onlinePayment}
+        today={today}
+      />
+    );
+  }
+  if (fees.standing === "unknown") {
+    return <NoFeeRecordCard />;
+  }
+  return <PaidUpCard paidUpTo={fees.paidThrough} />;
+}
 
 function FeesPage() {
   const { academyId, timeZone, today } = useAcademyClock();
   const academyName = useActiveMembership()?.academy.name;
+  // A failure with nothing to show throws to the route's error screen.
   const fees = useQuery(myFeesQueryOptions(academyId));
 
   return (
@@ -38,22 +63,18 @@ function FeesPage() {
       </PageHeader>
 
       {fees.data ? (
-        <div className="grid items-start gap-8 max-md:gap-5 lg:grid-cols-[440px_minmax(0,1fr)]">
-          {fees.data.due ? (
-            <FeeDueCard
-              due={fees.data.due}
-              onlinePayment={fees.data.onlinePayment}
-              today={today}
-            />
-          ) : (
-            <PaidUpCard paidUpTo={fees.data.paidThrough} />
-          )}
+        <div className={GRID}>
+          <StandingCard fees={fees.data} today={today} />
           <PaymentHistory fees={fees.data.data} timeZone={timeZone} />
         </div>
       ) : (
-        <div className="grid items-start gap-8 max-md:gap-5 lg:grid-cols-[440px_minmax(0,1fr)]">
+        <div className={GRID}>
           <Skeleton className="h-[290px] rounded-lg" />
-          <Skeleton className="h-[160px] rounded-md" />
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-4 w-12 rounded-full" />
+            <Skeleton className="h-[68px] rounded-md" />
+            <Skeleton className="h-[68px] rounded-md" />
+          </div>
         </div>
       )}
     </div>

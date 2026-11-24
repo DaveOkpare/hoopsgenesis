@@ -21,6 +21,7 @@ import { authErrorMessage, errorMessage } from "@/lib/api-client";
 import { authClient } from "@/lib/auth-client";
 
 const MIN_PASSWORD = 8;
+const WRONG_CREDENTIALS = 401;
 
 const schema = z.object({
   email: z.email("Enter a valid email address"),
@@ -99,7 +100,12 @@ export default function SignInForm({
         await authClient.signIn.email(value, {
           onSuccess: finishSignIn,
           onError: (error) => {
-            toast.error(authErrorMessage(error.error));
+            // 401 here is a wrong email or password, not an ended session.
+            toast.error(
+              error.error.status === WRONG_CREDENTIALS
+                ? "That email and password don't match. Try again."
+                : authErrorMessage(error.error)
+            );
           },
         });
       } catch (error) {
@@ -211,12 +217,22 @@ export default function SignInForm({
             New here?
           </p>
           <p className="text-muted text-sm leading-5">
-            Accounts are created from an invite. Ask your academy for one, then
-            open the link in the email.
+            Accounts come from an email invite or a join code from your academy.
+            Got a code?{" "}
+            <Link
+              className={authLinkClass}
+              search={{ account: "new" }}
+              to="/join"
+            >
+              Create an account
+            </Link>
           </p>
         </div>
         <p className="text-center text-muted text-sm leading-5 md:hidden">
-          No account yet? Open the invite link from your email.
+          No account? Open your invite email, or{" "}
+          <Link className={authLinkClass} to="/join">
+            use a join code
+          </Link>
         </p>
       </div>
     </form>

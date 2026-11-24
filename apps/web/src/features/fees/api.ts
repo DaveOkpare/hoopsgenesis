@@ -27,7 +27,6 @@ import type {
   Fee,
   Id,
   Money,
-  OutstandingFee,
   PaymentMethod,
   Team,
   Timestamp,
@@ -60,16 +59,35 @@ export interface PaymentRow extends Fee {
   voidedByName: string | null;
 }
 
+/**
+ * What an unpaid student owes. `estimated` when no fee was billed for the period: the
+ * server only knows an amount for billed fees, so the client multiplies their last
+ * payment by the months since it ran out. Students who never paid and were never billed
+ * have no amount at all (`owed: null`), never zero.
+ */
+export interface Owed extends Money {
+  estimated: boolean;
+}
+
 /** GET /fees/outstanding row plus the student's name and team. */
-export interface OutstandingRow extends OutstandingFee {
+export interface OutstandingRow {
+  /** Whole days past due (server); null when unknown (never paid, never billed). */
+  daysOverdue: number | null;
+  lastPaidAt: Timestamp | null;
+  owed: Owed | null;
   student: FeeStudent;
+  studentId: Id;
+  teamId: Id | null;
 }
 
 export interface FeeSummary {
   collected: Money;
   /** Share of this month's payments made online (mobile money), 0..1. */
   onlineShare: number;
+  /** Sum of the known and estimated amounts owed. */
   outstanding: Money;
+  /** Some of `outstanding` is estimated, or some unpaid students have no amount. */
+  outstandingIsEstimate: boolean;
   paidStudentCount: number;
   period: PeriodKey;
   unpaidStudentCount: number;
@@ -140,7 +158,7 @@ interface ServerOutstanding {
     dueDate: DateOnly;
   } | null;
   daysOverdue: number | null;
-  lastPayment: { paidAt: Timestamp } | null;
+  lastPayment: { amount: string; currency: string; paidAt: Timestamp } | null;
   overdueSince: DateOnly | null;
   student: { id: Id; name: string };
   teams: { id: Id; name: string }[];
@@ -259,6 +277,25 @@ export async function listFees(
     );
 }
 
+/** `GET /fees/:id`: one payment with the student's name and team (404 outside scope). */
+export async function getFee(academyId: Id, feeId: Id): Promise<PaymentRow> {
+  if (mock) {
+    return (await mock()).getFee(academyId, feeId);
+  }
+  const [row, directory] = await Promise.all([
+    apiData<ServerFee>(
+      academyPath(academyId, `/fees/${encodeURIComponent(feeId)}`)
+    ),
+    loadStudentDirectory(academyId),
+  ]);
+  return {
+    ...toFee(row),
+    student: studentFrom(directory, row.studentId, new Map()),
+    recordedByName: row.recordedBy?.name ?? null,
+    voidedByName: row.voidedBy?.name ?? null,
+  };
+}
+
 /** Most common amount among recent payments: the academy's usual monthly fee. */
 function usualFee(fees: readonly ServerFee[]): Money | null {
   const recent = fees
@@ -292,10 +329,29 @@ function monthsOwed(since: DateOnly | null, current: PeriodKey): number {
   return months;
 }
 
+/** The billed amount, else an estimate from the last payment, else nothing. */
+function owedFor(row: ServerOutstanding, current: PeriodKey): Owed | null {
+  if (row.currentFee) {
+    return {
+      amount: row.currentFee.amount,
+      currency: row.currentFee.currency,
+      estimated: false,
+    };
+  }
+  if (row.lastPayment) {
+    const months = monthsOwed(row.overdueSince, current);
+    return {
+      amount: (Number(row.lastPayment.amount) * months).toFixed(2),
+      currency: row.lastPayment.currency,
+      estimated: true,
+    };
+  }
+  return null;
+}
+
 /**
  * `GET /fees/outstanding?teamId=` (on = today): students with no paid fee covering
- * today. The server has no amount for students who were never billed; the amount shown
- * is their billed fee when there is one, else the usual fee per month owed.
+ * today, with what they owe (see `Owed`) and the server's days overdue.
  */
 export async function listOutstandingFees(
   academyId: Id,
@@ -312,22 +368,15 @@ export async function listOutstandingFees(
     loadStudentDirectory(academyId),
     timeZoneOf(academyId),
   ]);
-  const usual = usualFee(fees);
   const current = periodOf(appNow(), timeZone);
   const lastPaid = lastPaidByStudent(fees);
   return rows.map((row) => {
-    const months = monthsOwed(row.overdueSince, current);
-    const amount =
-      row.currentFee?.amount ??
-      (usual ? (Number(usual.amount) * months).toFixed(2) : "0.00");
     const team = row.teams[0] ?? null;
     return {
       studentId: row.student.id,
       teamId: team?.id ?? null,
-      amount,
-      currency: row.currentFee?.currency ?? usual?.currency ?? "",
-      dueDate:
-        row.currentFee?.dueDate ?? row.overdueSince ?? periodDueDate(current),
+      owed: owedFor(row, current),
+      daysOverdue: row.daysOverdue,
       lastPaidAt: row.lastPayment?.paidAt ?? null,
       student: {
         ...studentFrom(directory, row.student.id, lastPaid, row.student.name),
@@ -361,7 +410,7 @@ export async function getFeeSummary(academyId: Id): Promise<FeeSummary> {
   );
   const currency =
     paid[0]?.currency ??
-    outstanding[0]?.currency ??
+    outstanding.find((row) => row.owed)?.owed?.currency ??
     (await loadAcademy(academyId))?.defaultCurrency ??
     "";
   const sum = (amounts: string[]) =>
@@ -372,9 +421,12 @@ export async function getFeeSummary(academyId: Id): Promise<FeeSummary> {
     collected: { amount: sum(paid.map((fee) => fee.amount)), currency },
     paidStudentCount: new Set(paid.map((fee) => fee.studentId)).size,
     outstanding: {
-      amount: sum(outstanding.map((row) => row.amount)),
+      amount: sum(outstanding.map((row) => row.owed?.amount ?? "0")),
       currency,
     },
+    outstandingIsEstimate: outstanding.some(
+      (row) => row.owed === null || row.owed.estimated
+    ),
     unpaidStudentCount: outstanding.length,
     onlineShare: paid.length === 0 ? 0 : online.length / paid.length,
   };

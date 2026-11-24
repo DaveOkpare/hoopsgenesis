@@ -1,6 +1,7 @@
 import { Button } from "@hoops-genesis/ui/components/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogTitle,
 } from "@hoops-genesis/ui/components/dialog";
@@ -35,10 +36,17 @@ import {
 } from "@hoops-genesis/ui/components/tabs";
 import { cn } from "@hoops-genesis/ui/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { type MouseEvent, useCallback, useMemo } from "react";
+import {
+  type MouseEvent,
+  useCallback,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { PlusIcon } from "@/components/icons";
 import { CodeDetail } from "@/features/join-codes/code-detail";
+import { PhoneCodeDetail } from "@/features/join-codes/code-detail-phone";
 import {
   codeByline,
   codeFor,
@@ -46,6 +54,7 @@ import {
   type StatusLabel,
   usesShort,
 } from "@/features/join-codes/describe";
+import { CloseIcon } from "@/features/join-codes/icons";
 import {
   type InvitationCode,
   joinCodesQueryOptions,
@@ -57,6 +66,35 @@ import { useViewer } from "@/features/viewer/queries";
 import { useIsPhone } from "@/lib/use-is-phone";
 
 const FAR_FUTURE = Number.POSITIVE_INFINITY;
+/** Codes that stopped working shown before "Show all" (6G1-0). */
+const SHOWN_INACTIVE = 2;
+
+/*
+ * Below 1024px the detail opens on its own (spec D5O-0, "Join code detail: Sheet"):
+ * a 440px sheet from the right on tablets (BJI-0), a full page on phones (9LI-0).
+ */
+const BELOW_LG_QUERY = "(max-width: 1023.98px)";
+
+function subscribeBelowLg(onChange: () => void): () => void {
+  const list = window.matchMedia(BELOW_LG_QUERY);
+  list.addEventListener("change", onChange);
+  return () => list.removeEventListener("change", onChange);
+}
+
+const isBelowLgNow = () => window.matchMedia(BELOW_LG_QUERY).matches;
+const notBelowLgOnServer = () => false;
+
+function useIsBelowLg(): boolean {
+  return useSyncExternalStore(
+    subscribeBelowLg,
+    isBelowLgNow,
+    notBelowLgOnServer
+  );
+}
+
+/** Tablet side sheet: overrides the centred dialog between md and lg (BJI-0). */
+const SIDE_SHEET_CLASS =
+  "md:top-0! md:right-0! md:left-auto! md:h-dvh! md:max-h-none! md:w-[440px]! md:max-w-none! md:translate-x-0! md:translate-y-0! md:rounded-none! md:shadow-[-12px_0_40px_#1111112E]! md:data-open:slide-in-from-right md:data-closed:slide-out-to-right md:data-open:zoom-in-100 md:data-closed:zoom-out-100";
 
 function expiryOrder(code: InvitationCode): number {
   return code.expiresAt ? Date.parse(code.expiresAt) : FAR_FUTURE;
@@ -155,6 +193,12 @@ function CodesTable({
   inactive: InvitationCode[];
   ctx: RowContext;
 }) {
+  const [showingAll, setShowingAll] = useState(false);
+  const showAll = useCallback(() => setShowingAll(true), []);
+  const selectedIndex = inactive.findIndex((c) => c.id === ctx.selectedId);
+  // Keep a selected old code in view even when the list is folded.
+  const shownCount = Math.max(SHOWN_INACTIVE, selectedIndex + 1);
+  const shownInactive = showingAll ? inactive : inactive.slice(0, shownCount);
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div
@@ -182,10 +226,25 @@ function CodesTable({
             NO LONGER WORKING
           </h2>
           <ul aria-label="Codes that no longer work">
-            {inactive.map((code) => (
+            {shownInactive.map((code) => (
               <CodeRow code={code} ctx={ctx} key={code.id} />
             ))}
           </ul>
+          {shownInactive.length < inactive.length ? (
+            <div className="flex items-center justify-between gap-4 pt-[18px] text-sm leading-[18px]">
+              <p className="text-muted">
+                Showing {shownInactive.length} of {inactive.length} codes that
+                stopped working
+              </p>
+              <button
+                className="cursor-pointer rounded-sm font-semibold text-ink underline decoration-1 outline-none [text-underline-position:from-font] hover:decoration-2 focus-visible:ring-2 focus-visible:ring-ink"
+                onClick={showAll}
+                type="button"
+              >
+                Show all {inactive.length}
+              </button>
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>
@@ -258,6 +317,7 @@ export type MembersSection = "all" | "invites" | "join-codes";
  */
 export function JoinCodesScreen({
   academyId,
+  academyName,
   onNew,
   onRevoke,
   onSection,
@@ -266,6 +326,7 @@ export function JoinCodesScreen({
   timeZone,
 }: {
   academyId: Id;
+  academyName: string;
   onNew: () => void;
   onRevoke: (id: Id) => void;
   onSection: (section: MembersSection) => void;
@@ -276,6 +337,8 @@ export function JoinCodesScreen({
   const viewer = useViewer();
   const now = useJoinCodesNow();
   const isPhone = useIsPhone();
+  const isBelowLg = useIsBelowLg();
+  const isTablet = isBelowLg && !isPhone;
   const codes = useQuery(joinCodesQueryOptions(academyId)).data;
   // Only the tab counts; left out if it fails.
   const counts = useQuery({
@@ -286,7 +349,8 @@ export function JoinCodesScreen({
 
   const desktopSelected =
     codes?.find((c) => c.id === selectedId) ?? active[0] ?? inactive[0] ?? null;
-  const phoneSelected = codes?.find((c) => c.id === selectedId) ?? null;
+  // Below lg nothing is selected until a row is tapped.
+  const pickedCode = codes?.find((c) => c.id === selectedId) ?? null;
 
   const handleSelect = useCallback(
     (event: MouseEvent<HTMLElement>) => {
@@ -310,7 +374,9 @@ export function JoinCodesScreen({
   const ctx: RowContext = {
     now,
     onSelect: handleSelect,
-    selectedId: isPhone ? null : (desktopSelected?.id ?? null),
+    selectedId: isBelowLg
+      ? (pickedCode?.id ?? null)
+      : (desktopSelected?.id ?? null),
     timeZone,
     viewerId: viewer.user.id,
   };
@@ -339,7 +405,7 @@ export function JoinCodesScreen({
           {desktopSelected ? (
             <aside
               aria-label={`Code ${desktopSelected.code}`}
-              className="w-[400px] shrink-0 rounded-lg border border-line p-6 max-lg:w-[340px]"
+              className="w-[400px] shrink-0 rounded-lg border border-line p-6 max-lg:hidden"
             >
               <CodeDetail
                 academyId={academyId}
@@ -405,25 +471,47 @@ export function JoinCodesScreen({
         </Tabs>
         {body}
       </div>
-      <Dialog
-        onOpenChange={handleSheet}
-        open={isPhone && phoneSelected !== null}
-      >
-        <DialogContent>
-          {phoneSelected ? (
-            <div className="flex flex-col gap-3 overflow-y-auto px-5 pt-4 pb-[max(24px,env(safe-area-inset-bottom))]">
-              <DialogTitle className="sr-only">
-                Code {phoneSelected.code}
-              </DialogTitle>
-              <CodeDetail
-                academyId={academyId}
-                code={phoneSelected}
-                key={phoneSelected.id}
-                now={now}
-                onRevoke={onRevoke}
-                timeZone={timeZone}
-              />
-            </div>
+      <Dialog onOpenChange={handleSheet} open={isTablet && pickedCode !== null}>
+        <DialogContent className={SIDE_SHEET_CLASS}>
+          {pickedCode ? (
+            <>
+              <div className="flex shrink-0 items-center justify-between border-line border-b py-[14px] pr-4 pl-6">
+                <DialogTitle className="font-sans font-semibold text-[15px] normal-case leading-[18px]">
+                  Join code
+                </DialogTitle>
+                <DialogClose
+                  aria-label="Close"
+                  className="flex size-11 cursor-pointer items-center justify-center rounded-full border border-line text-ink outline-none hover:bg-fog focus-visible:ring-2 focus-visible:ring-ink"
+                >
+                  <CloseIcon />
+                </DialogClose>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-6 pt-8">
+                <CodeDetail
+                  academyId={academyId}
+                  code={pickedCode}
+                  key={pickedCode.id}
+                  now={now}
+                  onRevoke={onRevoke}
+                  timeZone={timeZone}
+                />
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+      <Dialog onOpenChange={handleSheet} open={isPhone && pickedCode !== null}>
+        <DialogContent mobile="fullscreen">
+          {pickedCode ? (
+            <PhoneCodeDetail
+              academyId={academyId}
+              academyName={academyName}
+              code={pickedCode}
+              key={pickedCode.id}
+              now={now}
+              onRevoke={onRevoke}
+              timeZone={timeZone}
+            />
           ) : null}
         </DialogContent>
       </Dialog>

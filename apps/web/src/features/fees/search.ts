@@ -4,14 +4,18 @@
  *   ?period=2026-10&q=jean           Payments for October matching "jean"
  *   ?record=1&student=user-jean      Record payment dialog, student picked
  *   ?void=fee-samuel-m-nov           Void payment dialog for that fee
- *   ?highlight=<feeId>               Row highlighted (after "View payment")
+ *   ?fee=<feeId>                     Payment detail panel (GS7-0, H06-0; GOA-0 page on phones)
+ *   ?page=2                          Second page of payments (25 a page)
+ *   ?highlight=<feeId>               Row highlighted
  */
 import { isPeriodKey, type PeriodKey } from "@/features/fees/periods";
 
 export type FeesTab = "payments" | "unpaid";
 
 export interface FeesSearch {
+  fee?: string;
   highlight?: string;
+  page?: number;
   period?: PeriodKey;
   q?: string;
   record?: 1;
@@ -26,6 +30,11 @@ function text(value: unknown): string | undefined {
     return String(value);
   }
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function pageOf(value: unknown): number | undefined {
+  const page = Number(value);
+  return Number.isInteger(page) && page > 1 ? page : undefined;
 }
 
 export function parseFeesSearch(raw: Record<string, unknown>): FeesSearch {
@@ -44,5 +53,7 @@ export function parseFeesSearch(raw: Record<string, unknown>): FeesSearch {
     student: text(raw.student),
     void: text(raw.void),
     highlight: text(raw.highlight),
+    fee: text(raw.fee),
+    page: pageOf(raw.page),
   };
 }

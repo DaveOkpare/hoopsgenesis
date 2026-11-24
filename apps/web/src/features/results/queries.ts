@@ -12,7 +12,7 @@ import {
   listResultTemplates,
   listSessionOptions,
 } from "@/features/results/api";
-import type { ResultTemplate } from "@/features/results/templates";
+import type { ExtraValues, ResultTemplate } from "@/features/results/templates";
 import type { DateOnly, Id } from "@/features/types";
 import { errorMessage, isApiError } from "@/lib/api-client";
 
@@ -26,10 +26,20 @@ const resultKeys = {
   all: (academyId: Id) => ["academies", academyId, "results"] as const,
 };
 
-export function resultTemplatesQueryOptions(academyId: Id) {
+/** Query-key sections (after the academy id) whose data includes records. */
+const RECORD_READERS = new Set([
+  "results",
+  "records",
+  "teams",
+  "members",
+  "students",
+]);
+
+/** The chips for a student's team (the same for every team in real mode). */
+export function resultTemplatesQueryOptions(academyId: Id, teamId: Id | null) {
   return queryOptions({
-    queryKey: [...resultKeys.all(academyId), "templates"] as const,
-    queryFn: () => listResultTemplates(academyId),
+    queryKey: [...resultKeys.all(academyId), "templates", teamId] as const,
+    queryFn: () => listResultTemplates(academyId, { teamId }),
     staleTime: Number.POSITIVE_INFINITY,
   });
 }
@@ -93,17 +103,16 @@ export function useCreateAthleticRecord(academyId: Id) {
       recordedOn: DateOnly;
       template: ResultTemplate;
       score: number;
+      extras?: ExtraValues;
       eventId?: Id;
     }) => createAthleticRecord(academyId, input),
-    // Results, the review queues and the team tables all read records.
+    // Results, the review queues, the team pages and the profiles all read records.
     onSuccess: () =>
       queryClient.invalidateQueries({
         predicate: (query) =>
           query.queryKey[0] === "academies" &&
           query.queryKey[1] === academyId &&
-          (query.queryKey[2] === "results" ||
-            query.queryKey[2] === "records" ||
-            query.queryKey[2] === "team-detail"),
+          RECORD_READERS.has(String(query.queryKey[2])),
       }),
   });
 }

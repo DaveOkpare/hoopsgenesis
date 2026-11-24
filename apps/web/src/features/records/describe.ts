@@ -1,6 +1,11 @@
 /* How a record reads in the review queue: titles, subtitles and the entered fields. */
 import type { ReviewItem } from "@/features/records/queries";
-import { firstName, formatDayMonth } from "@/lib/format";
+import {
+  firstName,
+  formatDayMonth,
+  formatRelativeDay,
+  formatTime,
+} from "@/lib/format";
 
 const DRILL_LABEL: Record<string, string> = {
   free_throws: "Free throws",
@@ -201,4 +206,89 @@ export function waitingLabel(
     return "Today";
   }
   return diff === 1 ? "Yesterday" : `${diff} days`;
+}
+
+/** "Coach Patrick", "Coach Patrick or Sharika", "Coach Patrick or 2 others"; null when nobody. */
+export function reviewersLabel(names: readonly string[]): string | null {
+  const [first, ...rest] = names.map(firstName);
+  if (!first) {
+    return null;
+  }
+  if (rest.length === 0) {
+    return `Coach ${first}`;
+  }
+  return rest.length === 1
+    ? `Coach ${first} or ${rest[0]}`
+    : `Coach ${first} or ${rest.length} others`;
+}
+
+/** Admin list rows: "Report card · U14 · Coach Patrick", "Penalties · Girls U16 · no coach yet". */
+export function adminRecordSubtitle(item: ReviewItem): string {
+  if (!item.student.teamName) {
+    return `${recordTitle(item)} · No team yet`;
+  }
+  return [
+    recordTitle(item),
+    item.student.teamName,
+    reviewersLabel(item.reviewerNames) ??
+      (item.teamHasCoach ? "needs another coach" : "no coach yet"),
+  ].join(" · ");
+}
+
+export type ReviewState = "waiting" | "verified" | "rejected";
+
+/** The read-only status line: "Waiting for Coach Patrick to review", "Verified by Patrick". */
+export function reviewStatusLine(item: ReviewItem): {
+  state: ReviewState;
+  text: string;
+} {
+  if (item.status === "verified") {
+    return {
+      state: "verified",
+      text: item.verifiedByName
+        ? `Verified by ${firstName(item.verifiedByName)}`
+        : "Verified",
+    };
+  }
+  if (item.status === "rejected") {
+    return {
+      state: "rejected",
+      text: item.verifiedByName
+        ? `Rejected by ${firstName(item.verifiedByName)}`
+        : "Rejected",
+    };
+  }
+  const reviewers = reviewersLabel(item.reviewerNames);
+  if (reviewers) {
+    return { state: "waiting", text: `Waiting for ${reviewers} to review` };
+  }
+  let text = "Waiting. Not on a team, so no coach reviews it yet";
+  if (item.student.teamName) {
+    text = item.teamHasCoach
+      ? `Waiting. ${firstName(item.recordedByName)} entered it, so another coach must review it`
+      : `Waiting. ${item.student.teamName} has no coach yet`;
+  }
+  return { state: "waiting", text };
+}
+
+/** Phone detail line: "Olivia Uwimana · U12 · uploaded today, 08:14". */
+export function recordPhoneProvenance(
+  item: ReviewItem,
+  timeZone: string,
+  now: Date
+): string {
+  let verb = "recorded";
+  if (isSelfUpload(item)) {
+    verb = item.hasFile ? "uploaded" : "typed in";
+  }
+  const day = formatRelativeDay(item.createdAt, timeZone, now);
+  const dayText =
+    day === "Today" || day === "Yesterday" ? day.toLowerCase() : day;
+  return [
+    item.student.name,
+    item.student.teamName,
+    `${verb} ${dayText}, ${formatTime(item.createdAt, timeZone)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }

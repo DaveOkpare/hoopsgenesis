@@ -1,14 +1,13 @@
 import { Button, buttonVariants } from "@hoops-genesis/ui/components/button";
 import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMediaStack,
-  EmptyTitle,
-} from "@hoops-genesis/ui/components/empty";
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+} from "@hoops-genesis/ui/components/dialog";
 import { cn } from "@hoops-genesis/ui/lib/utils";
 import {
   QueryErrorResetBoundary,
+  useQuery,
   useQueryErrorResetBoundary,
 } from "@tanstack/react-query";
 import {
@@ -17,8 +16,9 @@ import {
   Link,
   Navigate,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router";
-import { LockKeyhole, RotateCw, TriangleAlert, WifiOff } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import {
   createContext,
   type ReactNode,
@@ -28,8 +28,21 @@ import {
   useState,
 } from "react";
 
+import {
+  AcademySwitcherSheet,
+  SHELL_SHEET_CLASS,
+} from "@/components/app-shell/academy-switcher";
 import { NotFound } from "@/components/not-found";
 import { PageFrame } from "@/components/page-frame";
+import type { AcademyRole } from "@/features/types";
+import type { Viewer } from "@/features/viewer/api";
+import { viewerQueryOptions } from "@/features/viewer/queries";
+import {
+  getActiveMembership,
+  homePathFor,
+  isOwner,
+  primaryRole,
+} from "@/features/viewer/selectors";
 import {
   currentReturnPath,
   type ErrorKind,
@@ -38,17 +51,23 @@ import {
 } from "@/lib/errors";
 
 /*
- * Error states. Screens never render an error's own message: the copy comes from the
- * kind of failure (lib/errors.ts).
+ * Error states ("[Spec] Empty, loading and error states" AGW-0, section 3). Screens
+ * never render an error's own message: the copy comes from the kind of failure
+ * (lib/errors.ts). Say what went wrong in plain words, keep what still works on screen,
+ * and give one way out.
  *
- *   <QueryBoundary what="unpaid students">  a section whose queries may fail. A failed
- *     query with no data throws (QueryClient default `throwOnError`), lands here, and
- *     only this section shows the error with "Try again"; the rest of the page stays.
+ *   <QueryBoundary what="the fees">  a section whose queries may fail. A failed query
+ *     with no data throws (QueryClient default `throwOnError`), lands here, and only
+ *     this section shows "We couldn’t load the fees" with "Try again"; the page title,
+ *     the nav and the other sections stay.
  *   RouteErrorScreen  the router's default errorComponent: a whole page failed (loader,
  *     beforeLoad, render or a page-level query). Inside the AppShell for signed-in pages.
+ *     404 shows the dark "Out of bounds" page; 403 the "This page is for admins" page.
  *   ErrorState  the visual itself, for screens that handle `query.error` inline (with
  *     `throwOnError: false`), such as dialogs whose queries run while they are closed.
- *     `failedQueries(a, b)` gives the first error and a retry that refetches the failed.
+ *     variant="section" (default): fog card, left-aligned. variant="page": fills the
+ *     main column. `failedQueries(a, b)` gives the first error and a retry for all.
+ *   Offline: the black bar and useIsOffline() live in components/offline.tsx.
  */
 
 interface RetryableQuery {
@@ -83,8 +102,7 @@ const COPY: Record<
   },
   failed: {
     title: "Something went wrong",
-    description:
-      "This didn’t load. It’s usually brief, so try again in a moment.",
+    description: "Your data is safe. Try again in a moment.",
   },
   forbidden: {
     title: "No access",
@@ -97,32 +115,256 @@ const COPY: Record<
   },
 };
 
-const ICONS = {
-  offline: WifiOff,
-  failed: TriangleAlert,
-  forbidden: LockKeyhole,
-  not_found: TriangleAlert,
-} as const;
-
-/** 401: the session ended. Go to sign in, and come back here afterwards. */
-function SignInAgain({ variant }: { variant: "page" | "section" }) {
-  const redirect = currentReturnPath();
+/** Orange-deep circled "!" from the spec's "We couldn’t load the fees" card. */
+function AlertIcon({ className }: { className?: string }) {
   return (
-    <Empty className={variant === "section" ? "gap-3 py-8" : undefined}>
-      <EmptyHeader>
-        <EmptyTitle className={variant === "section" ? SECTION_TITLE : ""}>
-          Signing you in again
-        </EmptyTitle>
-        <EmptyDescription>
-          Your session ended. Taking you to sign in…
-        </EmptyDescription>
-      </EmptyHeader>
-      <Navigate replace search={{ redirect }} to="/login" />
-    </Empty>
+    <svg aria-hidden="true" className={className} viewBox="0 0 28 28">
+      <circle
+        cx="14"
+        cy="14"
+        fill="none"
+        r="11"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M14 8.5v7"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="2.2"
+      />
+      <circle cx="14" cy="19.5" fill="currentColor" r="1.4" />
+    </svg>
   );
 }
 
-const SECTION_TITLE = "text-[28px] max-md:text-[24px]";
+/** 401: the session ended. Go to sign in, and come back here afterwards. */
+function SignInAgain({
+  variant,
+  className,
+}: {
+  variant: "page" | "section";
+  className?: string;
+}) {
+  const redirect = currentReturnPath();
+  const isPage = variant === "page";
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-start gap-2 bg-fog",
+        isPage
+          ? "flex-1 justify-center rounded-lg p-10 max-md:p-6"
+          : "rounded-[18px] p-[18px]",
+        className
+      )}
+      role="status"
+    >
+      <p
+        className={cn(
+          isPage
+            ? "font-display text-[44px] text-ink uppercase leading-none max-md:text-[34px]"
+            : "font-semibold text-base text-ink leading-[22px]"
+        )}
+      >
+        Signing you in again
+      </p>
+      <p className="text-muted text-sm leading-5">
+        Your session ended. Taking you to sign in…
+      </p>
+      <Navigate replace search={{ redirect }} to="/login" />
+    </div>
+  );
+}
+
+const ROLE_AREAS: Record<string, string> = {
+  "/admin": "admins",
+  "/coach": "coaches",
+  "/student": "students",
+  "/owner": "the platform owner",
+};
+
+const ROLE_NOUN: Record<AcademyRole, string> = {
+  admin: "an admin",
+  coach: "a coach",
+  student: "a student",
+};
+
+const HOME_LABEL: Record<string, string> = {
+  "/admin": "Go to Dashboard",
+  "/coach": "Go to Today",
+  "/student": "Go to Today",
+  "/owner": "Go to Academies",
+  "/join": "Join an academy",
+};
+
+function forbiddenDescription(viewer: Viewer | undefined): string {
+  if (viewer && isOwner(viewer)) {
+    return "You’re signed in as the platform owner. Open the academy from the owner console instead.";
+  }
+  const membership = viewer ? getActiveMembership(viewer) : null;
+  if (membership) {
+    return `You’re signed in as ${ROLE_NOUN[primaryRole(membership)]} in ${membership.academy.name}. Ask your academy admin if you need access.`;
+  }
+  return COPY.forbidden.description;
+}
+
+/**
+ * 403 as a page ("Wrong role"): name the role they have and who to ask, send them to
+ * their own home, never show the hidden data. Works outside the shell too (it reads
+ * the viewer from the cache and falls back to general copy).
+ */
+function ForbiddenPage({ className }: { className?: string }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // Read the signed-in person from the cache only; never fetch from an error screen.
+  const { data: viewer } = useQuery({
+    ...viewerQueryOptions(),
+    enabled: false,
+  });
+  const area = Object.keys(ROLE_AREAS).find(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+  const home = viewer ? homePathFor(viewer) : "/app";
+  const canSwitch = (viewer?.memberships.length ?? 0) > 1;
+  return (
+    <section
+      aria-labelledby="forbidden-title"
+      className={cn(
+        "flex flex-col gap-10 rounded-lg border border-line p-10 max-md:border-0 max-md:p-0",
+        className
+      )}
+      data-error-kind="forbidden"
+    >
+      <div className="flex max-w-[640px] flex-col gap-[10px]">
+        <p className="font-medium text-[13px] text-muted uppercase leading-4 tracking-label">
+          403 · Not allowed
+        </p>
+        <h1
+          className="font-display text-[56px] text-ink uppercase leading-[56px] max-md:text-[38px] max-md:leading-[38px]"
+          id="forbidden-title"
+        >
+          {area ? `This page is for ${ROLE_AREAS[area]}` : "No access"}
+        </h1>
+        <p className="text-[17px] text-muted leading-body max-md:text-sm max-md:leading-5">
+          {forbiddenDescription(viewer)}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2 max-md:flex-col">
+        <Link
+          className={cn(buttonVariants({ size: "lg" }), "max-md:w-full")}
+          to={home}
+        >
+          {HOME_LABEL[home] ?? "Go to your home"}
+        </Link>
+        {canSwitch ? (
+          <Dialog>
+            <DialogTrigger
+              render={
+                <Button className="max-md:w-full" size="lg" variant="outline" />
+              }
+            >
+              Switch academy
+            </DialogTrigger>
+            <DialogContent className={SHELL_SHEET_CLASS}>
+              <AcademySwitcherSheet />
+            </DialogContent>
+          </Dialog>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+type ShownKind = Exclude<ErrorKind, "unauthorized">;
+
+/** Title and text for a failure, from its kind (never the error's own message). */
+function errorCopy(
+  kind: ShownKind,
+  isPage: boolean,
+  what?: string
+): { title: string; description: string } {
+  const { title, description } = COPY[kind];
+  if (kind === "offline") {
+    return isPage
+      ? { title, description }
+      : {
+          title: what ? `We couldn’t load ${what}` : "We couldn’t load this",
+          description: "No connection. Check it, then try again.",
+        };
+  }
+  if (kind === "failed") {
+    if (isPage) {
+      return { title: "This page didn’t load", description };
+    }
+    return {
+      title: what ? `We couldn’t load ${what}` : "We couldn’t load this",
+      description,
+    };
+  }
+  return { title, description };
+}
+
+function ErrorActions({
+  isPage,
+  canRetry,
+  retrying,
+  onRetry,
+  homeTo,
+}: {
+  isPage: boolean;
+  canRetry: boolean;
+  retrying: boolean;
+  onRetry: () => void;
+  homeTo: "/app" | "/";
+}) {
+  if (!(canRetry || isPage)) {
+    return null;
+  }
+  const retryLabel = retrying ? "Trying again…" : "Try again";
+  if (!isPage) {
+    return (
+      <div className="pt-1">
+        <Button
+          className="px-[18px]"
+          disabled={retrying}
+          onClick={onRetry}
+          size="sm"
+        >
+          {retryLabel}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-3 max-md:w-full max-md:flex-col">
+      {canRetry ? (
+        <Button
+          className="max-md:w-full"
+          disabled={retrying}
+          onClick={onRetry}
+          size="lg"
+        >
+          <RotateCw
+            aria-hidden="true"
+            className={cn(retrying && "animate-spin")}
+          />
+          {retryLabel}
+        </Button>
+      ) : null}
+      <Link
+        className={cn(
+          buttonVariants({
+            variant: canRetry ? "outline" : "default",
+            size: "lg",
+          }),
+          "max-md:w-full"
+        )}
+        to={homeTo}
+      >
+        Go to your home
+      </Link>
+    </div>
+  );
+}
 
 export function ErrorState({
   error,
@@ -135,11 +377,11 @@ export function ErrorState({
   error: unknown;
   /** Shown as "Try again" for failures that can pass on a second go. */
   onRetry?: () => unknown;
-  /** page: fills the main column with the large empty-state art. section: compact. */
+  /** page: fills the main column. section: a compact fog card in place of the data. */
   variant?: "page" | "section";
-  /** Section title "Couldn’t load {what}" instead of the generic one. */
+  /** Section title "We couldn’t load {what}" instead of the generic one. */
   what?: string;
-  /** Where "Go home" leads; public pages pass "/". */
+  /** Where "Go to your home" leads; public pages pass "/". */
   homeTo?: "/app" | "/";
   className?: string;
 }) {
@@ -158,67 +400,63 @@ export function ErrorState({
   }, [onRetry]);
 
   if (kind === "unauthorized") {
-    return <SignInAgain variant={variant} />;
+    return <SignInAgain className={className} variant={variant} />;
   }
-  const copy = COPY[kind];
-  const Icon = ICONS[kind];
-  const canRetry = Boolean(onRetry) && kind !== "forbidden";
   const isPage = variant === "page";
-  const title =
-    !isPage && what && kind !== "forbidden"
-      ? `Couldn’t load ${what}`
-      : copy.title;
+  if (isPage && kind === "not_found") {
+    return <NotFound />;
+  }
+  if (isPage && kind === "forbidden") {
+    return <ForbiddenPage className={className} />;
+  }
+  const { title, description } = errorCopy(kind, isPage, what);
 
   return (
-    <Empty
-      className={cn(!isPage && "flex-none gap-4 px-5 py-8", className)}
+    <div
+      className={cn(
+        "flex flex-col items-start bg-fog",
+        isPage
+          ? "flex-1 justify-center gap-3 rounded-lg p-10 max-md:p-6"
+          : "gap-2 rounded-[18px] p-[18px]",
+        className
+      )}
       data-error-kind={kind}
       role="alert"
     >
-      {isPage ? (
-        <EmptyMediaStack>
-          <Icon className="size-14 text-white" strokeWidth={1.75} />
-        </EmptyMediaStack>
-      ) : null}
-      <EmptyHeader>
-        <EmptyTitle className={isPage ? undefined : SECTION_TITLE}>
-          {title}
-        </EmptyTitle>
-        <EmptyDescription className={isPage ? undefined : "text-[15px]"}>
-          {copy.description}
-        </EmptyDescription>
-      </EmptyHeader>
-      <div className="flex flex-wrap items-center justify-center gap-3 max-md:w-full max-md:flex-col">
-        {canRetry ? (
-          <Button
-            className="max-md:w-full"
-            disabled={retrying}
-            onClick={retry}
-            size={isPage ? "lg" : "default"}
-          >
-            <RotateCw
-              aria-hidden="true"
-              className={cn(retrying && "animate-spin")}
-            />
-            {retrying ? "Trying again…" : "Try again"}
-          </Button>
-        ) : null}
-        {isPage ? (
-          <Link
-            className={cn(
-              buttonVariants({
-                variant: canRetry ? "outline" : "default",
-                size: "lg",
-              }),
-              "max-md:w-full"
-            )}
-            to={homeTo}
-          >
-            Go to your home
-          </Link>
-        ) : null}
-      </div>
-    </Empty>
+      <AlertIcon
+        className={cn(
+          "shrink-0 text-orange-deep",
+          isPage ? "size-10" : "size-7"
+        )}
+      />
+      <p
+        className={cn(
+          "text-ink",
+          isPage
+            ? "font-display text-[44px] uppercase leading-none max-md:text-[34px]"
+            : "font-semibold text-base leading-[22px]"
+        )}
+      >
+        {title}
+      </p>
+      <p
+        className={cn(
+          "max-w-[480px] text-muted",
+          isPage
+            ? "text-[17px] leading-body max-md:text-[15px]"
+            : "text-sm leading-5"
+        )}
+      >
+        {description}
+      </p>
+      <ErrorActions
+        canRetry={Boolean(onRetry) && kind !== "forbidden"}
+        homeTo={homeTo}
+        isPage={isPage}
+        onRetry={retry}
+        retrying={retrying}
+      />
+    </div>
   );
 }
 
@@ -282,7 +520,8 @@ export function QueryBoundary({
 
 /**
  * The router's default errorComponent. A page-level failure: 404 shows the not-found
- * screen; everything else the page-sized ErrorState, inside the shell when signed in.
+ * screen, 403 the "not allowed" page; everything else the page-sized ErrorState,
+ * inside the shell when signed in.
  */
 export function RouteErrorScreen({ error, reset }: ErrorComponentProps) {
   const router = useRouter();

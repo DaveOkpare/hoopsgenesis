@@ -14,6 +14,7 @@ import {
   countOutstandingFees,
   DuplicatePaymentError,
   getDefaultFee,
+  getFee,
   getFeeSummary,
   listFeeStudents,
   listFees,
@@ -33,6 +34,7 @@ export type {
   FeeStudent,
   FeeSummary,
   OutstandingRow,
+  Owed,
   PaymentRow,
   RecordPaymentInput,
 } from "@/features/fees/api";
@@ -54,6 +56,8 @@ export const feeKeys = {
   outstanding: (academyId: Id, teamId: Id | null) =>
     [...feeKeys.all(academyId), "outstanding", { teamId }] as const,
   summary: (academyId: Id) => [...feeKeys.all(academyId), "summary"] as const,
+  detail: (academyId: Id, feeId: Id) =>
+    [...feeKeys.all(academyId), "detail", feeId] as const,
   students: (academyId: Id) => [...feeKeys.all(academyId), "students"] as const,
   teams: (academyId: Id) => [...feeKeys.all(academyId), "teams"] as const,
   defaultFee: (academyId: Id) =>
@@ -74,6 +78,14 @@ export function feesQueryOptions(academyId: Id, period: PeriodKey | null) {
   return queryOptions({
     queryKey: feeKeys.list(academyId, period),
     queryFn: () => listFees(academyId, { period }),
+  });
+}
+
+/** One payment for the detail panel (`?fee=`, deep-linkable). */
+export function feeQueryOptions(academyId: Id, feeId: Id) {
+  return queryOptions({
+    queryKey: feeKeys.detail(academyId, feeId),
+    queryFn: () => getFee(academyId, feeId),
   });
 }
 

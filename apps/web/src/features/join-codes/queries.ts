@@ -12,8 +12,10 @@ import {
 
 import {
   canExtendInvitationCodes,
+  canPreviewCodesSignedOut,
   createInvitationCode,
   extendInvitationCode,
+  getJoinedDetails,
   getJoinPreviewExtras,
   getJoinSession,
   type InvitationCode,
@@ -25,6 +27,7 @@ import {
   MAX_CODE_LIFETIME_MS,
   MAX_CODE_USES,
   previewInvitationCode,
+  rateLimitRetryAt,
   redeemInvitationCode,
   referenceNow,
   revokeInvitationCode,
@@ -40,6 +43,7 @@ export type {
   InvitationCodeRedeemResult,
   InvitationCodeRole,
   InvitationCodeStatus,
+  JoinedDetails,
   JoinPreviewAs,
   JoinSession,
 } from "@/features/join-codes/api";
@@ -56,6 +60,14 @@ export function joinCodeErrorCode(
 ): InvitationCodeErrorCode | null {
   return invitationCodeErrorCode(error);
 }
+
+/** When code entry opens again after a 429, if the answer said (never guessed). */
+export function joinCodeRetryAt(error: unknown, now: Date): Date | null {
+  return rateLimitRetryAt(error, now);
+}
+
+/** Real mode can't preview a code signed out (the route needs a session). */
+export const canPreviewJoinCodeSignedOut = canPreviewCodesSignedOut;
 
 /** "Extend" has no endpoint; the control shows only in preview. */
 export const canExtendJoinCodes = canExtendInvitationCodes;
@@ -75,6 +87,8 @@ export const joinCodeKeys = {
     ["invitation-codes", "preview", code, userId] as const,
   extras: (academyId: Id, teamId: Id | null) =>
     ["invitation-codes", "extras", academyId, teamId] as const,
+  joined: (academyId: Id, teamId: Id | null) =>
+    ["invitation-codes", "joined", academyId, teamId] as const,
 };
 
 export function joinCodesQueryOptions(academyId: Id) {
@@ -119,6 +133,15 @@ export function joinPreviewExtrasQueryOptions(
     queryKey: joinCodeKeys.extras(academyId, teamId),
     queryFn: () => getJoinPreviewExtras({ academyId, teamId }),
     staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+/** Place and next session on "Joined with a code", read as the new member. */
+export function joinedDetailsQueryOptions(academyId: Id, teamId: Id | null) {
+  return queryOptions({
+    queryKey: joinCodeKeys.joined(academyId, teamId),
+    queryFn: () => getJoinedDetails({ academyId, teamId }),
+    staleTime: 60_000,
   });
 }
 

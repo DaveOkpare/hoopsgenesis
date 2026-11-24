@@ -9,14 +9,17 @@ import { Skeleton } from "@hoops-genesis/ui/components/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
-
+import { AttendanceMonth } from "@/features/student-attendance/attendance-month";
 import {
   AttendanceLegend,
   AttendanceSummaryTiles,
   attendanceCell,
   MonthPicker,
 } from "@/features/student-attendance/attendance-views";
-import { myAttendanceQueryOptions } from "@/features/student-attendance/queries";
+import {
+  myAttendanceQueryOptions,
+  sessionDaysQueryOptions,
+} from "@/features/student-attendance/queries";
 import { summarizeAttendance } from "@/features/student-attendance/summary";
 import {
   addMonths,
@@ -29,17 +32,10 @@ import {
   monthName,
   monthOf,
 } from "@/features/student-calendar/dates";
-import {
-  type DayCell,
-  MonthGrid,
-} from "@/features/student-calendar/month-grid";
-import {
-  studentEventsQueryOptions,
-  useAcademyClock,
-} from "@/features/student-calendar/queries";
-import { isCancelledOn } from "@/features/student-calendar/selectors";
+import type { DayCell } from "@/features/student-calendar/month-grid";
+import { useAcademyClock } from "@/features/student-calendar/queries";
 import { ProgressSwitch } from "@/features/student-progress/progress-switch";
-import type { DateOnly } from "@/features/types";
+import type { DateOnly, Id } from "@/features/types";
 import { useViewer } from "@/features/viewer/queries";
 
 interface AttendanceSearch {
@@ -76,7 +72,7 @@ function AttendancePage() {
   const range = { from: firstOfMonth(month), to: lastOfMonth(month) };
 
   const rows = useQuery(myAttendanceQueryOptions(academyId, range));
-  const events = useQuery(studentEventsQueryOptions(academyId, range));
+  const sessions = useQuery(sessionDaysQueryOptions(academyId, range));
 
   const changeMonth = useCallback(
     (next: MonthKey) =>
@@ -93,16 +89,20 @@ function AttendancePage() {
   const summary = summarizeAttendance(past);
 
   const rowByDay = new Map(past.map((row) => [row.sessionDate, row]));
+  const liveSessions = (sessions.data ?? []).filter((s) => !s.cancelled);
   const upcomingDays = new Set(
-    (events.data ?? [])
-      .filter(
-        (event) =>
-          event.teamId !== null &&
-          event.startDate > today &&
-          !isCancelledOn(event, event.startDate)
-      )
-      .map((event) => event.startDate)
+    liveSessions.filter((s) => s.sessionDate > today).map((s) => s.sessionDate)
   );
+  // Each day opens its session: the one attended, else the first that day.
+  const sessionOn = new Map<DateOnly, Id>();
+  for (const s of liveSessions) {
+    if (!sessionOn.has(s.sessionDate)) {
+      sessionOn.set(s.sessionDate, s.eventId);
+    }
+  }
+  for (const row of past) {
+    sessionOn.set(row.sessionDate, row.eventId);
+  }
   const cells = new Map<DateOnly, DayCell>();
   for (const date of eachDay(range.from, range.to)) {
     cells.set(
@@ -113,7 +113,7 @@ function AttendancePage() {
       })
     );
   }
-  const ready = Boolean(rows.data && events.data);
+  const ready = Boolean(rows.data && sessions.data);
 
   return (
     <div className="flex flex-col gap-8 max-md:gap-5 lg:max-w-[912px]">
@@ -138,8 +138,17 @@ function AttendancePage() {
             summary={summary}
           />
           <div className="flex w-full flex-col gap-5 lg:order-1 lg:max-w-[560px]">
-            <MonthGrid cells={cells} month={month} />
+            <AttendanceMonth
+              cells={cells}
+              month={month}
+              sessionOn={sessionOn}
+            />
             <AttendanceLegend />
+            {sessionOn.size > 0 ? (
+              <p className="text-[13px] text-muted leading-4">
+                Tap a day to open that session.
+              </p>
+            ) : null}
           </div>
         </div>
       ) : (
